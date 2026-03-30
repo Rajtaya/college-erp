@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Environment variables (NEVER commit secrets)
+.env
+.env.local
+.env.production
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+frontend/build/
+frontend/dist/
+
+# Archives & dumps (large binary files)
+*.zip
+*.sql
+*.pdf
+
+# Scratch files
+p.txt
+pp.txt
+ppp.txt

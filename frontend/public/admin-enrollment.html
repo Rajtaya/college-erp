@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Admin — Enrollment Panel</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:#f0f2f5;color:#333}
+#loginScreen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#1e3a5f,#2980b9)}
+.login-card{background:#fff;border-radius:12px;padding:40px;width:360px;box-shadow:0 8px 32px rgba(0,0,0,.2)}
+.login-card h2{text-align:center;color:#1e3a5f;margin-bottom:6px}
+.login-card p{text-align:center;color:#888;margin-bottom:24px;font-size:14px}
+.login-card input{width:100%;padding:12px 14px;border:1.5px solid #ddd;border-radius:8px;margin-bottom:12px;font-size:15px;outline:none;transition:border-color .2s}
+.login-card input:focus{border-color:#2980b9}
+.btn-login{width:100%;padding:12px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:16px;cursor:pointer}
+.btn-login:hover{background:#2980b9}
+#loginError{color:#e74c3c;font-size:13px;margin-top:8px;text-align:center}
+#mainScreen{display:none}
+.topbar{background:#1e3a5f;color:#fff;padding:14px 28px;display:flex;align-items:center;justify-content:space-between}
+.topbar h1{font-size:20px}
+.btn-logout{background:rgba(255,255,255,.15);border:none;color:#fff;padding:7px 16px;border-radius:6px;cursor:pointer;font-size:13px}
+.container{max-width:1200px;margin:28px auto;padding:0 20px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.stat-card{background:#fff;border-radius:10px;padding:20px 24px;box-shadow:0 2px 8px rgba(0,0,0,.06);text-align:center}
+.stat-card .num{font-size:34px;font-weight:700}
+.stat-card .lbl{font-size:13px;color:#888;margin-top:4px}
+.stat-card.blue .num{color:#2980b9}
+.stat-card.green .num{color:#27ae60}
+.stat-card.orange .num{color:#e67e22}
+.stat-card.red .num{color:#e74c3c}
+.filters{background:#fff;border-radius:10px;padding:14px 18px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.filters input,.filters select{padding:9px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:14px;outline:none}
+.filters input{flex:1;min-width:180px}
+.filters input:focus,.filters select:focus{border-color:#2980b9}
+.btn-refresh{padding:9px 16px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px}
+.table-wrap{background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.06);overflow:hidden}
+table{width:100%;border-collapse:collapse}
+thead{background:#1e3a5f;color:#fff}
+thead th{padding:13px 14px;text-align:left;font-size:13px;font-weight:600}
+tbody tr{border-bottom:1px solid #f0f0f0;transition:background .15s}
+tbody tr:hover{background:#f7f9fc}
+tbody td{padding:11px 14px;font-size:14px}
+.roll{font-weight:700;color:#1e3a5f}
+.prog{font-size:12px;color:#888}
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600}
+.badge.none{background:#f0f0f0;color:#999}
+.badge.partial{background:#fff3cd;color:#856404}
+.badge.done{background:#d4edda;color:#155724}
+.badge.modified{background:#cce5ff;color:#004085}
+.btn-edit{padding:5px 12px;background:#2980b9;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;margin-right:5px}
+.btn-edit:hover{background:#1e6fa0}
+.btn-reset{padding:5px 12px;background:#e74c3c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px}
+.btn-reset:hover{background:#c0392b}
+.btn-reset:disabled{background:#ccc;cursor:not-allowed}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:#fff;border-radius:12px;width:920px;max-width:96vw;max-height:90vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,.2)}
+.modal-header{background:#1e3a5f;color:#fff;padding:16px 22px;display:flex;align-items:center;justify-content:space-between}
+.modal-header h3{font-size:16px}
+.modal-close{background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1}
+.modal-body{padding:18px 22px;overflow-y:auto;flex:1}
+.modal-info{background:#f0f4f8;border-radius:8px;padding:12px 16px;margin-bottom:14px;display:flex;gap:20px;flex-wrap:wrap;font-size:14px}
+.modal-info strong{color:#1e3a5f}
+.admin-note-box{background:#fffbeb;border:1.5px solid #fcd34d;border-radius:8px;padding:12px 16px;margin-bottom:14px}
+.admin-note-box label{font-size:13px;font-weight:600;color:#92400e;display:block;margin-bottom:6px}
+.admin-note-box input{width:100%;padding:8px 12px;border:1.5px solid #fcd34d;border-radius:6px;font-size:14px;outline:none;background:#fff}
+.changes-bar{background:#f0fff4;border:1.5px solid #9ae6b4;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#276749;display:none;font-weight:600}
+.cat-section{margin-bottom:18px;border-radius:10px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+.cat-header{padding:10px 16px;color:#fff;display:flex;justify-content:space-between;align-items:center;font-weight:700;font-size:14px}
+.sub-table{width:100%;border-collapse:collapse;font-size:13px}
+.sub-table th{background:#f0f4f8;padding:9px 12px;text-align:left;font-weight:600;color:#555;border-bottom:2px solid #ddd}
+.sub-table td{padding:9px 12px;border-bottom:1px solid #f0f0f0;vertical-align:middle}
+.sub-table tr:hover td{background:#fafbfc}
+.row-changed{background:#fffbeb !important}
+.modified-tag{font-size:10px;background:#fcd34d;color:#92400e;padding:1px 5px;border-radius:3px;margin-left:5px;font-weight:700}
+.toggle-group{display:flex;gap:5px}
+.btn-acc{padding:4px 11px;background:#27ae60;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:12px;font-weight:600;opacity:0.35;transition:all .15s}
+.btn-rej{padding:4px 11px;background:#e74c3c;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:12px;font-weight:600;opacity:0.35;transition:all .15s}
+.btn-acc.on{opacity:1;transform:scale(1.06)}
+.btn-rej.on{opacity:1;transform:scale(1.06)}
+.orig-ACCEPTED{color:#27ae60;font-weight:600}
+.orig-REJECTED{color:#e74c3c;font-weight:600}
+.orig-PENDING{color:#e67e22;font-weight:600}
+.orig-NOT_ENROLLED{color:#aaa;font-size:12px}
+.modal-footer{padding:14px 22px;border-top:1px solid #eee;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.btn-save{padding:10px 24px;background:#27ae60;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px;font-weight:700;transition:background .2s}
+.btn-save:hover{background:#219a52}
+.btn-save:disabled{background:#ccc;cursor:not-allowed}
+.btn-modal-reset{padding:9px 18px;background:#e74c3c;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px}
+.btn-close-modal{padding:9px 18px;background:#eee;color:#333;border:none;border-radius:8px;cursor:pointer;font-size:14px}
+.loading{text-align:center;padding:40px;color:#888;font-size:15px}
+.empty{text-align:center;padding:40px;color:#bbb;font-size:15px}
+@media(max-width:600px){.stats{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="login-card">
+    <h2>🎓 College ERP</h2>
+    <p>Admin Enrollment Panel</p>
+    <input type="email" id="adminEmail" placeholder="Admin Email"/>
+    <input type="password" id="adminPass" placeholder="Password"/>
+    <button class="btn-login" onclick="doLogin()">Login</button>
+    <div id="loginError"></div>
+  </div>
+</div>
+
+<div id="mainScreen">
+  <div class="topbar">
+    <h1>📋 Admin Enrollment Panel</h1>
+    <div style="display:flex;align-items:center;gap:14px">
+      <span id="adminName" style="font-size:13px;opacity:.85"></span>
+      <button class="btn-logout" onclick="doLogout()">Logout</button>
+    </div>
+  </div>
+  <div class="container">
+    <div class="stats">
+      <div class="stat-card blue"><div class="num" id="statTotal">—</div><div class="lbl">Total Students</div></div>
+      <div class="stat-card green"><div class="num" id="statEnrolled">—</div><div class="lbl">Fully Enrolled</div></div>
+      <div class="stat-card orange"><div class="num" id="statPending">—</div><div class="lbl">Has Pending</div></div>
+      <div class="stat-card red"><div class="num" id="statNone">—</div><div class="lbl">Not Started</div></div>
+    </div>
+    <div class="filters">
+      <input type="text" id="searchInput" placeholder="🔍 Search name or roll no..." oninput="renderTable()"/>
+      <select id="filterProg" onchange="renderTable()"><option value="">All Programmes</option></select>
+      <select id="filterSem" onchange="renderTable()"><option value="">All Semesters</option></select>
+      <select id="filterStatus" onchange="renderTable()">
+        <option value="">All Status</option>
+        <option value="done">Fully Enrolled</option>
+        <option value="partial">Has Pending</option>
+        <option value="none">Not Started</option>
+        <option value="modified">Admin Modified</option>
+      </select>
+      <button class="btn-refresh" onclick="loadSummary()">↻ Refresh</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Roll No</th><th>Student Name</th><th>Programme</th><th>Sem</th><th>Total</th><th>Accepted</th><th>Pending</th><th>Status</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="tableBody"><tr><td colspan="9" class="loading">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modalTitle">Enrollment Editor</h3>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-info" id="modalInfo"></div>
+      <div class="admin-note-box">
+        <label>📝 Admin Note (will be shown to student)</label>
+        <input type="text" id="adminNoteInput" placeholder="e.g. Subject changed due to timetable conflict..."/>
+      </div>
+      <div class="changes-bar" id="changesBar"></div>
+      <div id="modalContent"><div class="loading">Loading subjects...</div></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-modal-reset" onclick="resetFromModal()">🗑 Reset All Enrollment</button>
+      <div style="display:flex;gap:10px">
+        <button class="btn-close-modal" onclick="closeModal()">Cancel</button>
+        <button class="btn-save" id="btnSave" onclick="saveChanges()" disabled>💾 Save Changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE = 'https://college-erp-backend-production.up.railway.app/api';
+let token = localStorage.getItem('admin_token')||'';
+let adminInfo = JSON.parse(localStorage.getItem('admin_info')||'null');
+let allData = [];
+let currentStudentId = null;
+let origStatus = {};
+let currStatus = {};
+
+const CAT_COLORS = {MAJOR:'#4c51bf',MIC:'#057a55',MDC:'#dd6b20',SEC:'#e53e3e',VAC:'#d69e2e',AEC:'#805ad5'};
+const CAT_ORDER  = ['MAJOR','MIC','MDC','SEC','AEC','VAC'];
+
+async function doLogin() {
+  const email = document.getElementById('adminEmail').value.trim();
+  const pass  = document.getElementById('adminPass').value;
+  document.getElementById('loginError').textContent = '';
+  try {
+    const res  = await fetch(`${BASE}/admin/login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password:pass})});
+    const data = await res.json();
+    if (!res.ok){document.getElementById('loginError').textContent=data.error;return;}
+    token=data.token; adminInfo=data.admin;
+    localStorage.setItem('admin_token',token);
+    localStorage.setItem('admin_info',JSON.stringify(adminInfo));
+    showMain();
+  } catch(e){document.getElementById('loginError').textContent='Connection error. Is backend running on localhost:3000?';}
+}
+
+function doLogout(){
+  localStorage.removeItem('admin_token');localStorage.removeItem('admin_info');
+  token='';adminInfo=null;allData=[];
+  document.getElementById('mainScreen').style.display='none';
+  document.getElementById('loginScreen').style.display='flex';
+}
+
+function showMain(){
+  document.getElementById('loginScreen').style.display='none';
+  document.getElementById('mainScreen').style.display='block';
+  document.getElementById('adminName').textContent='👤 '+(adminInfo?.name||'Admin');
+  loadSummary();
+}
+
+async function loadSummary(){
+  document.getElementById('tableBody').innerHTML='<tr><td colspan="9" class="loading">Loading...</td></tr>';
+  try{
+    const res=await fetch(`${BASE}/admin/enrollment/summary`,{headers:{Authorization:`Bearer ${token}`}});
+    if(res.status===401){doLogout();return;}
+    allData=await res.json();
+    updateStats();populateFilters();renderTable();
+  }catch(e){
+    document.getElementById('tableBody').innerHTML='<tr><td colspan="9" class="empty">❌ Failed to load. Is backend running?</td></tr>';
+  }
+}
+
+function updateStats(){
+  document.getElementById('statTotal').textContent    = allData.length;
+  document.getElementById('statEnrolled').textContent = allData.filter(s=>s.total_enrolled>0&&s.pending==0).length;
+  document.getElementById('statPending').textContent  = allData.filter(s=>s.pending>0).length;
+  document.getElementById('statNone').textContent     = allData.filter(s=>s.total_enrolled==0).length;
+}
+
+function populateFilters(){
+  const progs=[...new Set(allData.map(s=>s.programme_name).filter(Boolean))].sort();
+  document.getElementById('filterProg').innerHTML='<option value="">All Programmes</option>'+progs.map(p=>`<option value="${p}">${p}</option>`).join('');
+  const sems=[...new Set(allData.map(s=>s.semester).filter(Boolean))].sort((a,b)=>a-b);
+  document.getElementById('filterSem').innerHTML='<option value="">All Semesters</option>'+sems.map(s=>`<option value="${s}">Semester ${s}</option>`).join('');
+}
+
+function renderTable(){
+  const search=document.getElementById('searchInput').value.toLowerCase();
+  const prog=document.getElementById('filterProg').value;
+  const sem=document.getElementById('filterSem').value;
+  const status=document.getElementById('filterStatus').value;
+
+  const data=allData.filter(s=>{
+    const ms=!search||s.student_name?.toLowerCase().includes(search)||s.roll_no?.toLowerCase().includes(search);
+    const mp=!prog||s.programme_name===prog;
+    const msm=!sem||String(s.semester)===sem;
+    let mst=true;
+    if(status==='done')     mst=s.total_enrolled>0&&s.pending==0;
+    if(status==='partial')  mst=s.pending>0;
+    if(status==='none')     mst=s.total_enrolled==0;
+    if(status==='modified') mst=s.admin_modified==1;
+    return ms&&mp&&msm&&mst;
+  });
+
+  if(!data.length){document.getElementById('tableBody').innerHTML='<tr><td colspan="9" class="empty">No students found</td></tr>';return;}
+
+  document.getElementById('tableBody').innerHTML=data.map(s=>{
+    let bc='none',bt='Not Started';
+    if(s.admin_modified==1)                    {bc='modified';bt='Admin Modified';}
+    else if(s.total_enrolled>0&&s.pending==0)  {bc='done';    bt='Enrolled';}
+    else if(s.pending>0)                       {bc='partial'; bt='Pending';}
+    return `<tr>
+      <td class="roll">${s.roll_no||'—'}</td>
+      <td>${s.student_name||'—'}</td>
+      <td><div>${s.programme_name||'—'}</div><div class="prog">${s.level_name||''}</div></td>
+      <td>${s.semester||'—'}</td>
+      <td>${s.total_enrolled||0}</td>
+      <td>${s.accepted||0}</td>
+      <td>${s.pending||0}</td>
+      <td><span class="badge ${bc}">${bt}</span></td>
+      <td>
+        <button class="btn-edit" onclick="openModal(${s.student_id},'${esc(s.student_name)}','${esc(s.roll_no)}','${esc(s.programme_name)}',${s.semester||0})">✏️ Edit</button>
+        <button class="btn-reset" onclick="resetEnrollment(${s.student_id},'${esc(s.student_name)}')" ${s.total_enrolled>0?'':'disabled'}>Reset</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function esc(s){return(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
+
+async function resetEnrollment(id,name){
+  if(!confirm(`Reset ALL enrollment for ${name}?\nThis cannot be undone.`))return;
+  try{
+    const res=await fetch(`${BASE}/admin/enrollment/reset/${id}`,{method:'DELETE',headers:{Authorization:`Bearer ${token}`}});
+    const data=await res.json();
+    alert(res.ok?'✅ '+data.message:'❌ '+data.error);
+    if(res.ok)loadSummary();
+  }catch(e){alert('❌ Connection error');}
+}
+
+async function resetFromModal(){
+  if(!currentStudentId)return;
+  if(!confirm('Reset ALL enrollment for this student?\nThis cannot be undone.'))return;
+  try{
+    const res=await fetch(`${BASE}/admin/enrollment/reset/${currentStudentId}`,{method:'DELETE',headers:{Authorization:`Bearer ${token}`}});
+    const data=await res.json();
+    alert(res.ok?'✅ '+data.message:'❌ '+data.error);
+    if(res.ok){closeModal();loadSummary();}
+  }catch(e){alert('❌ Connection error');}
+}
+
+async function openModal(studentId,name,roll,prog,sem){
+  currentStudentId=studentId; origStatus={}; currStatus={};
+  document.getElementById('modalTitle').textContent=`✏️ Edit Enrollment — ${name}`;
+  document.getElementById('modalInfo').innerHTML=`<span><strong>Roll No:</strong> ${roll}</span><span><strong>Programme:</strong> ${prog}</span><span><strong>Semester:</strong> ${sem}</span>`;
+  document.getElementById('adminNoteInput').value='';
+  document.getElementById('changesBar').style.display='none';
+  document.getElementById('btnSave').disabled=true;
+  document.getElementById('btnSave').textContent='💾 Save Changes';
+  document.getElementById('modalContent').innerHTML='<div class="loading">Loading subjects...</div>';
+  document.getElementById('modalOverlay').classList.add('open');
+
+  try{
+    const res=await fetch(`${BASE}/admin/enrollment/detail/${studentId}`,{headers:{Authorization:`Bearer ${token}`}});
+    const data=await res.json();
+    if(!data.length){document.getElementById('modalContent').innerHTML='<div class="empty">No subjects found for this student.</div>';return;}
+    data.forEach(r=>{const st=r.status||'NOT_ENROLLED';origStatus[r.subject_id]=st;currStatus[r.subject_id]=st;});
+    renderModalTable(data);
+  }catch(e){document.getElementById('modalContent').innerHTML='<div class="empty">❌ Failed to load subjects.</div>';}
+}
+
+function renderModalTable(data){
+  const groups={};
+  data.forEach(r=>{if(!groups[r.category])groups[r.category]=[];groups[r.category].push(r);});
+  const sorted=[...CAT_ORDER,...Object.keys(groups).filter(c=>!CAT_ORDER.includes(c))];
+
+  let html='';
+  sorted.forEach(cat=>{
+    if(!groups[cat])return;
+    const color=CAT_COLORS[cat]||'#667eea';
+    html+=`<div class="cat-section">
+      <div class="cat-header" style="background:${color}">
+        <span>${cat} — ${groups[cat].length} subjects</span>
+        <span style="font-size:12px;opacity:.8;font-weight:400">Click Accept/Reject to change</span>
+      </div>
+      <table class="sub-table">
+        <thead><tr><th>Code</th><th>Subject Name</th><th>Discipline</th><th>Cr</th><th>Current Status</th><th>Change To</th></tr></thead>
+        <tbody>`;
+    groups[cat].forEach(r=>{
+      const orig=r.status||'NOT_ENROLLED';
+      const wasModified=r.admin_modified;
+      html+=`<tr id="row-${r.subject_id}" class="${wasModified?'row-changed':''}">
+        <td><code>${r.subject_code}</code>${wasModified?'<span class="modified-tag">MOD</span>':''}</td>
+        <td>${r.subject_name}</td>
+        <td>${r.discipline_name||'—'}</td>
+        <td style="text-align:center">${r.credits}</td>
+        <td><span class="orig-${orig}">${orig}</span></td>
+        <td>
+          <div class="toggle-group">
+            <button class="btn-acc ${orig==='ACCEPTED'?'on':''}" id="acc-${r.subject_id}" onclick="toggle(${r.subject_id},'ACCEPTED')">✅ Accept</button>
+            <button class="btn-rej ${orig==='REJECTED'?'on':''}" id="rej-${r.subject_id}" onclick="toggle(${r.subject_id},'REJECTED')">❌ Reject</button>
+          </div>
+        </td>
+      </tr>`;
+    });
+    html+=`</tbody></table></div>`;
+  });
+  document.getElementById('modalContent').innerHTML=html;
+}
+
+function toggle(subjectId,newStatus){
+  const cur=currStatus[subjectId];
+  const final=cur===newStatus?origStatus[subjectId]:newStatus;
+  currStatus[subjectId]=final;
+
+  const a=document.getElementById(`acc-${subjectId}`);
+  const r=document.getElementById(`rej-${subjectId}`);
+  if(a)a.className=`btn-acc ${final==='ACCEPTED'?'on':''}`;
+  if(r)r.className=`btn-rej ${final==='REJECTED'?'on':''}`;
+
+  const row=document.getElementById(`row-${subjectId}`);
+  if(row)row.className=final!==origStatus[subjectId]?'row-changed':'';
+
+  refreshChangesBar();
+}
+
+function refreshChangesBar(){
+  const changes=Object.entries(currStatus).filter(([id,st])=>st!==origStatus[id]);
+  const btn=document.getElementById('btnSave');
+  const bar=document.getElementById('changesBar');
+  if(!changes.length){btn.disabled=true;bar.style.display='none';return;}
+  btn.disabled=false;
+  bar.style.display='block';
+  bar.innerHTML=`✏️ <strong>${changes.length} change(s) pending:</strong> `+
+    changes.map(([id,st])=>`<span style="margin-left:8px;background:#d4edda;padding:2px 8px;border-radius:4px">${origStatus[id]} → ${st}</span>`).join('');
+}
+
+async function saveChanges(){
+  const changes=Object.entries(currStatus).filter(([id,st])=>st!==origStatus[id]).map(([id,st])=>({subject_id:parseInt(id),status:st}));
+  if(!changes.length){alert('No changes to save.');return;}
+  const adminNote=document.getElementById('adminNoteInput').value.trim();
+  if(!adminNote){
+    if(!confirm('No admin note added. Student will see a generic notification.\n\nSave anyway?'))return;
+  }
+  document.getElementById('btnSave').disabled=true;
+  document.getElementById('btnSave').textContent='⏳ Saving...';
+  try{
+    const res=await fetch(`${BASE}/admin/enrollment/bulkupdate/${currentStudentId}`,{
+      method:'PUT',
+      headers:{'Content-Type':'application/json',Authorization:`Bearer ${token}`},
+      body:JSON.stringify({changes,admin_note:adminNote})
+    });
+    const data=await res.json();
+    if(res.ok){alert(`✅ ${data.message}`);closeModal();loadSummary();}
+    else{alert('❌ '+data.error);document.getElementById('btnSave').disabled=false;document.getElementById('btnSave').textContent='💾 Save Changes';}
+  }catch(e){alert('❌ Connection error');document.getElementById('btnSave').disabled=false;document.getElementById('btnSave').textContent='💾 Save Changes';}
+}
+
+function closeModal(){
+  document.getElementById('modalOverlay').classList.remove('open');
+  currentStudentId=null;origStatus={};currStatus={};
+  document.getElementById('btnSave').textContent='💾 Save Changes';
+}
+
+document.getElementById('modalOverlay').addEventListener('click',function(e){if(e.target===this)closeModal();});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&document.getElementById('loginScreen').style.display!=='none')doLogin();
+  if(e.key==='Escape')closeModal();
+});
+
+if(token&&adminInfo)showMain();
+</script>
+</body>
+</html>

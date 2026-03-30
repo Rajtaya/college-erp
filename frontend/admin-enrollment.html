@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Admin — Enrollment Panel</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Segoe UI',sans-serif;background:#f0f2f5;color:#333}
+#loginScreen{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(135deg,#1e3a5f,#2980b9)}
+.login-card{background:#fff;border-radius:12px;padding:40px;width:360px;box-shadow:0 8px 32px rgba(0,0,0,.2)}
+.login-card h2{text-align:center;color:#1e3a5f;margin-bottom:6px}
+.login-card p{text-align:center;color:#888;margin-bottom:24px;font-size:14px}
+.login-card input{width:100%;padding:12px 14px;border:1.5px solid #ddd;border-radius:8px;margin-bottom:12px;font-size:15px;outline:none;transition:border-color .2s}
+.login-card input:focus{border-color:#2980b9}
+.btn-login{width:100%;padding:12px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;font-size:16px;cursor:pointer;transition:background .2s}
+.btn-login:hover{background:#2980b9}
+#loginError{color:#e74c3c;font-size:13px;margin-top:8px;text-align:center}
+#mainScreen{display:none}
+.topbar{background:#1e3a5f;color:#fff;padding:14px 28px;display:flex;align-items:center;justify-content:space-between}
+.topbar h1{font-size:20px}
+.btn-logout{background:rgba(255,255,255,.15);border:none;color:#fff;padding:7px 16px;border-radius:6px;cursor:pointer;font-size:13px}
+.btn-logout:hover{background:rgba(255,255,255,.25)}
+.container{max-width:1200px;margin:28px auto;padding:0 20px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.stat-card{background:#fff;border-radius:10px;padding:20px 24px;box-shadow:0 2px 8px rgba(0,0,0,.06);text-align:center}
+.stat-card .num{font-size:34px;font-weight:700}
+.stat-card .lbl{font-size:13px;color:#888;margin-top:4px}
+.stat-card.blue .num{color:#2980b9}
+.stat-card.green .num{color:#27ae60}
+.stat-card.orange .num{color:#e67e22}
+.stat-card.red .num{color:#e74c3c}
+.filters{background:#fff;border-radius:10px;padding:14px 18px;box-shadow:0 2px 8px rgba(0,0,0,.06);margin-bottom:18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.filters input,.filters select{padding:9px 12px;border:1.5px solid #ddd;border-radius:8px;font-size:14px;outline:none}
+.filters input{flex:1;min-width:180px}
+.filters input:focus,.filters select:focus{border-color:#2980b9}
+.btn-refresh{padding:9px 16px;background:#1e3a5f;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px}
+.btn-refresh:hover{background:#2980b9}
+.table-wrap{background:#fff;border-radius:10px;box-shadow:0 2px 8px rgba(0,0,0,.06);overflow:hidden}
+table{width:100%;border-collapse:collapse}
+thead{background:#1e3a5f;color:#fff}
+thead th{padding:13px 14px;text-align:left;font-size:13px;font-weight:600}
+tbody tr{border-bottom:1px solid #f0f0f0;transition:background .15s}
+tbody tr:hover{background:#f7f9fc}
+tbody td{padding:11px 14px;font-size:14px}
+.roll{font-weight:700;color:#1e3a5f}
+.prog{font-size:12px;color:#888}
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:12px;font-weight:600}
+.badge.none{background:#f0f0f0;color:#999}
+.badge.partial{background:#fff3cd;color:#856404}
+.badge.done{background:#d4edda;color:#155724}
+.btn-view{padding:5px 12px;background:#2980b9;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;margin-right:5px}
+.btn-view:hover{background:#1e6fa0}
+.btn-reset{padding:5px 12px;background:#e74c3c;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px}
+.btn-reset:hover{background:#c0392b}
+.btn-reset:disabled{background:#ccc;cursor:not-allowed}
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:1000;align-items:center;justify-content:center}
+.modal-overlay.open{display:flex}
+.modal{background:#fff;border-radius:12px;width:740px;max-width:95vw;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 16px 48px rgba(0,0,0,.2)}
+.modal-header{background:#1e3a5f;color:#fff;padding:16px 22px;display:flex;align-items:center;justify-content:space-between}
+.modal-header h3{font-size:16px}
+.modal-close{background:none;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1}
+.modal-body{padding:18px 22px;overflow-y:auto;flex:1}
+.modal-info{background:#f0f4f8;border-radius:8px;padding:12px 16px;margin-bottom:16px;display:flex;gap:20px;flex-wrap:wrap;font-size:14px}
+.modal-info strong{color:#1e3a5f}
+.sub-table{width:100%;border-collapse:collapse;font-size:13px}
+.sub-table th{background:#f0f4f8;padding:9px 12px;text-align:left;font-weight:600;color:#555;border-bottom:2px solid #ddd}
+.sub-table td{padding:9px 12px;border-bottom:1px solid #f0f0f0}
+.sub-table tr:hover td{background:#fafbfc}
+.cat-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700}
+.cat-MAJOR{background:#d4edda;color:#155724}
+.cat-MIC{background:#cce5ff;color:#004085}
+.cat-MDC{background:#fff3cd;color:#856404}
+.cat-SEC{background:#f8d7da;color:#721c24}
+.cat-AEC{background:#e2d9f3;color:#5a0080}
+.cat-VAC{background:#d1ecf1;color:#0c5460}
+.status-ACCEPTED{color:#27ae60;font-weight:600}
+.status-REJECTED{color:#e74c3c;font-weight:600}
+.status-PENDING{color:#e67e22;font-weight:600}
+.modal-footer{padding:14px 22px;border-top:1px solid #eee;display:flex;justify-content:flex-end;gap:10px}
+.btn-modal-reset{padding:9px 18px;background:#e74c3c;color:#fff;border:none;border-radius:8px;cursor:pointer;font-size:14px}
+.btn-modal-reset:hover{background:#c0392b}
+.btn-close-modal{padding:9px 18px;background:#eee;color:#333;border:none;border-radius:8px;cursor:pointer;font-size:14px}
+.loading{text-align:center;padding:40px;color:#888;font-size:15px}
+.empty{text-align:center;padding:40px;color:#bbb;font-size:15px}
+@media(max-width:600px){.stats{grid-template-columns:repeat(2,1fr)}.filters{flex-direction:column}.filters input{min-width:unset;width:100%}}
+</style>
+</head>
+<body>
+
+<div id="loginScreen">
+  <div class="login-card">
+    <h2>🎓 College ERP</h2>
+    <p>Admin Enrollment Panel</p>
+    <input type="email" id="adminEmail" placeholder="Admin Email"/>
+    <input type="password" id="adminPass" placeholder="Password"/>
+    <button class="btn-login" onclick="doLogin()">Login</button>
+    <div id="loginError"></div>
+  </div>
+</div>
+
+<div id="mainScreen">
+  <div class="topbar">
+    <h1>📋 Admin Enrollment Panel</h1>
+    <div style="display:flex;align-items:center;gap:14px">
+      <span id="adminName" style="font-size:13px;opacity:.85"></span>
+      <button class="btn-logout" onclick="doLogout()">Logout</button>
+    </div>
+  </div>
+  <div class="container">
+    <div class="stats">
+      <div class="stat-card blue"><div class="num" id="statTotal">—</div><div class="lbl">Total Students</div></div>
+      <div class="stat-card green"><div class="num" id="statEnrolled">—</div><div class="lbl">Fully Enrolled</div></div>
+      <div class="stat-card orange"><div class="num" id="statPending">—</div><div class="lbl">Has Pending</div></div>
+      <div class="stat-card red"><div class="num" id="statNone">—</div><div class="lbl">Not Started</div></div>
+    </div>
+    <div class="filters">
+      <input type="text" id="searchInput" placeholder="🔍 Search name or roll no..." oninput="renderTable()"/>
+      <select id="filterProg" onchange="renderTable()"><option value="">All Programmes</option></select>
+      <select id="filterSem" onchange="renderTable()"><option value="">All Semesters</option></select>
+      <select id="filterStatus" onchange="renderTable()">
+        <option value="">All Status</option>
+        <option value="done">Fully Enrolled</option>
+        <option value="partial">Has Pending</option>
+        <option value="none">Not Started</option>
+      </select>
+      <button class="btn-refresh" onclick="loadSummary()">↻ Refresh</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Roll No</th><th>Student Name</th><th>Programme</th><th>Sem</th>
+            <th>Total</th><th>Accepted</th><th>Pending</th><th>Status</th><th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"><tr><td colspan="9" class="loading">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modalTitle">Enrollment Detail</h3>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-info" id="modalInfo"></div>
+      <div id="modalContent"><div class="loading">Loading...</div></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-close-modal" onclick="closeModal()">Close</button>
+      <button class="btn-modal-reset" onclick="resetFromModal()">🔄 Reset Enrollment</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE = 'https://college-erp-backend-production.up.railway.app/api';
+let token = localStorage.getItem('admin_token') || '';
+let adminInfo = JSON.parse(localStorage.getItem('admin_info') || 'null');
+let allData = [];
+let currentStudentId = null;
+
+async function doLogin() {
+  const email = document.getElementById('adminEmail').value.trim();
+  const pass  = document.getElementById('adminPass').value;
+  document.getElementById('loginError').textContent = '';
+  try {
+    const res  = await fetch(`${BASE}/admin/login`, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({email, password: pass})
+    });
+    const data = await res.json();
+    if (!res.ok) { document.getElementById('loginError').textContent = data.error; return; }
+    token = data.token; adminInfo = data.admin;
+    localStorage.setItem('admin_token', token);
+    localStorage.setItem('admin_info', JSON.stringify(adminInfo));
+    showMain();
+  } catch(e) {
+    document.getElementById('loginError').textContent = 'Connection error. Check backend.';
+  }
+}
+
+function doLogout() {
+  localStorage.removeItem('admin_token'); localStorage.removeItem('admin_info');
+  token=''; adminInfo=null; allData=[];
+  document.getElementById('mainScreen').style.display='none';
+  document.getElementById('loginScreen').style.display='flex';
+}
+
+function showMain() {
+  document.getElementById('loginScreen').style.display='none';
+  document.getElementById('mainScreen').style.display='block';
+  document.getElementById('adminName').textContent='👤 '+(adminInfo?.name||'Admin');
+  loadSummary();
+}
+
+async function loadSummary() {
+  document.getElementById('tableBody').innerHTML='<tr><td colspan="9" class="loading">Loading...</td></tr>';
+  try {
+    const res = await fetch(`${BASE}/admin/enrollment/summary`, {headers:{Authorization:`Bearer ${token}`}});
+    if (res.status===401) { doLogout(); return; }
+    allData = await res.json();
+    updateStats(); populateFilters(); renderTable();
+  } catch(e) {
+    document.getElementById('tableBody').innerHTML='<tr><td colspan="9" class="empty">❌ Failed to load. Check backend.</td></tr>';
+  }
+}
+
+function updateStats() {
+  document.getElementById('statTotal').textContent    = allData.length;
+  document.getElementById('statEnrolled').textContent = allData.filter(s=>s.total_enrolled>0&&s.pending==0).length;
+  document.getElementById('statPending').textContent  = allData.filter(s=>s.pending>0).length;
+  document.getElementById('statNone').textContent     = allData.filter(s=>s.total_enrolled==0).length;
+}
+
+function populateFilters() {
+  const progs = [...new Set(allData.map(s=>s.programme_name).filter(Boolean))].sort();
+  document.getElementById('filterProg').innerHTML =
+    '<option value="">All Programmes</option>'+progs.map(p=>`<option value="${p}">${p}</option>`).join('');
+  const sems = [...new Set(allData.map(s=>s.semester).filter(Boolean))].sort((a,b)=>a-b);
+  document.getElementById('filterSem').innerHTML =
+    '<option value="">All Semesters</option>'+sems.map(s=>`<option value="${s}">Semester ${s}</option>`).join('');
+}
+
+function renderTable() {
+  const search = document.getElementById('searchInput').value.toLowerCase();
+  const prog   = document.getElementById('filterProg').value;
+  const sem    = document.getElementById('filterSem').value;
+  const status = document.getElementById('filterStatus').value;
+
+  const data = allData.filter(s => {
+    const ms = !search || s.student_name?.toLowerCase().includes(search) || s.roll_no?.toLowerCase().includes(search);
+    const mp = !prog   || s.programme_name===prog;
+    const msm= !sem    || String(s.semester)===sem;
+    let mst  = true;
+    if (status==='done')    mst = s.total_enrolled>0 && s.pending==0;
+    if (status==='partial') mst = s.pending>0;
+    if (status==='none')    mst = s.total_enrolled==0;
+    return ms&&mp&&msm&&mst;
+  });
+
+  if (!data.length) {
+    document.getElementById('tableBody').innerHTML='<tr><td colspan="9" class="empty">No students found</td></tr>';
+    return;
+  }
+
+  document.getElementById('tableBody').innerHTML = data.map(s => {
+    let bc='none', bt='Not Started';
+    if (s.total_enrolled>0&&s.pending==0){bc='done';bt='Enrolled';}
+    else if (s.pending>0){bc='partial';bt='Pending';}
+    return `<tr>
+      <td class="roll">${s.roll_no||'—'}</td>
+      <td>${s.student_name||'—'}</td>
+      <td><div>${s.programme_name||'—'}</div><div class="prog">${s.level_name||''}</div></td>
+      <td>${s.semester||'—'}</td>
+      <td>${s.total_enrolled||0}</td>
+      <td>${s.accepted||0}</td>
+      <td>${s.pending||0}</td>
+      <td><span class="badge ${bc}">${bt}</span></td>
+      <td>
+        <button class="btn-view" onclick="viewStudent(${s.student_id},'${esc(s.student_name)}','${esc(s.roll_no)}','${esc(s.programme_name)}',${s.semester||0})">View</button>
+        <button class="btn-reset" onclick="resetEnrollment(${s.student_id},'${esc(s.student_name)}')" ${s.total_enrolled>0?'':'disabled'}>Reset</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function esc(s){return(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
+
+async function resetEnrollment(id, name) {
+  if (!confirm(`Reset ALL enrollment for ${name}?\nStudent will need to re-enroll. This cannot be undone.`)) return;
+  try {
+    const res  = await fetch(`${BASE}/admin/enrollment/reset/${id}`,{method:'DELETE',headers:{Authorization:`Bearer ${token}`}});
+    const data = await res.json();
+    alert(res.ok?'✅ '+data.message:'❌ '+data.error);
+    if (res.ok) loadSummary();
+  } catch(e){alert('❌ Connection error');}
+}
+
+async function resetFromModal() {
+  if (!currentStudentId) return;
+  if (!confirm('Reset enrollment for this student?\nThis cannot be undone.')) return;
+  try {
+    const res  = await fetch(`${BASE}/admin/enrollment/reset/${currentStudentId}`,{method:'DELETE',headers:{Authorization:`Bearer ${token}`}});
+    const data = await res.json();
+    alert(res.ok?'✅ '+data.message:'❌ '+data.error);
+    if (res.ok){closeModal();loadSummary();}
+  } catch(e){alert('❌ Connection error');}
+}
+
+async function viewStudent(id, name, roll, prog, sem) {
+  currentStudentId = id;
+  document.getElementById('modalTitle').textContent = `${name} — Enrollment Detail`;
+  document.getElementById('modalInfo').innerHTML =
+    `<span><strong>Roll No:</strong> ${roll}</span>
+     <span><strong>Programme:</strong> ${prog}</span>
+     <span><strong>Semester:</strong> ${sem}</span>`;
+  document.getElementById('modalContent').innerHTML='<div class="loading">Loading subjects...</div>';
+  document.getElementById('modalOverlay').classList.add('open');
+
+  try {
+    const res  = await fetch(`${BASE}/admin/enrollment/detail/${id}`,{headers:{Authorization:`Bearer ${token}`}});
+    const data = await res.json();
+    if (!data.length){
+      document.getElementById('modalContent').innerHTML='<div class="empty">No enrollment records found.</div>';
+      return;
+    }
+    const catOrder=['MAJOR','MIC','MDC','SEC','AEC','VAC'];
+    const groups={};
+    data.forEach(r=>{if(!groups[r.category])groups[r.category]=[];groups[r.category].push(r);});
+    const sorted=[...catOrder,...Object.keys(groups).filter(c=>!catOrder.includes(c))];
+
+    let html=`<table class="sub-table"><thead><tr>
+      <th>Category</th><th>Code</th><th>Subject Name</th><th>Cr</th><th>Discipline</th><th>Status</th>
+    </tr></thead><tbody>`;
+    sorted.forEach(cat=>{
+      if(!groups[cat])return;
+      groups[cat].forEach(r=>{
+        html+=`<tr>
+          <td><span class="cat-badge cat-${cat}">${cat}</span></td>
+          <td><code>${r.subject_code}</code></td>
+          <td>${r.subject_name}</td>
+          <td>${r.credits}</td>
+          <td>${r.discipline_name||'—'}</td>
+          <td><span class="status-${r.status}">${r.status}</span></td>
+        </tr>`;
+      });
+    });
+    html+='</tbody></table>';
+    document.getElementById('modalContent').innerHTML=html;
+  } catch(e){
+    document.getElementById('modalContent').innerHTML='<div class="empty">❌ Failed to load detail.</div>';
+  }
+}
+
+function closeModal(){
+  document.getElementById('modalOverlay').classList.remove('open');
+  currentStudentId=null;
+}
+
+document.getElementById('modalOverlay').addEventListener('click',function(e){if(e.target===this)closeModal();});
+document.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&document.getElementById('loginScreen').style.display!=='none')doLogin();
+  if(e.key==='Escape')closeModal();
+});
+
+if(token&&adminInfo)showMain();
+</script>
+</body>
+</html>
