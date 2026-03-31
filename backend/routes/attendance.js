@@ -2,24 +2,11 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { verify } = require('../middleware/auth');
+const { assertTeacherOwnsSubject } = require('../middleware/subjectAuth');
 
 router.use(verify());
 
-const VALID_STATUSES = new Set(['PRESENT', 'ABSENT', 'LATE', 'LEAVE']);
-
-// Helper: verify teacher is assigned to the subject (admin bypasses)
-async function assertTeacherOwnsSubject(req, res, subject_id) {
-  if (req.user.role === 'admin') return true;
-  const [rows] = await db.query(
-    'SELECT 1 FROM subject_teachers WHERE subject_id = ? AND teacher_id = ?',
-    [subject_id, req.user.id]
-  );
-  if (!rows.length) {
-    res.status(403).json({ error: 'You are not assigned to this subject' });
-    return false;
-  }
-  return true;
-}
+const VALID_STATUSES = new Set(['PRESENT', 'ABSENT', 'LEAVE']);
 
 // POST / — Mark single attendance (upsert)
 router.post('/', verify('teacher', 'admin'), async (req, res) => {
@@ -98,7 +85,6 @@ router.get('/student/:student_id/summary', async (req, res) => {
       `SELECT s.subject_id, s.subject_name, s.subject_code,
               COUNT(*) AS total,
               SUM(a.status = 'PRESENT') AS present,
-              SUM(a.status = 'LATE') AS late,
               ROUND(SUM(a.status = 'PRESENT') / COUNT(*) * 100, 1) AS percentage
        FROM attendance a
        JOIN subjects s ON a.subject_id = s.subject_id
@@ -167,10 +153,12 @@ router.get('/defaulters', verify('teacher', 'admin'), async (req, res) => {
 // PUT /:attendance_id — Update attendance status
 router.put('/:attendance_id', verify('teacher', 'admin'), async (req, res) => {
   const { status } = req.body;
+  if (!VALID_STATUSES.has((status || '').toUpperCase()))
+    return res.status(400).json({ error: `Invalid status. Must be one of: ${[...VALID_STATUSES].join(', ')}` });
   try {
     const [result] = await db.query(
       'UPDATE attendance SET status = ? WHERE attendance_id = ?',
-      [status, req.params.attendance_id]
+      [status.toUpperCase(), req.params.attendance_id]
     );
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Attendance record not found' });

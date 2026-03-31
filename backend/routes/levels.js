@@ -25,7 +25,8 @@ router.post('/', verify('admin'), async (req, res) => {
 // Delete level
 router.delete('/:id', verify('admin'), async (req, res) => {
   try {
-    await db.query('DELETE FROM levels WHERE level_id = ?', [req.params.id]);
+    const [result] = await db.query('DELETE FROM levels WHERE level_id = ?', [req.params.id]);
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Level not found' });
     res.json({ message: 'Level deleted' });
   } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });

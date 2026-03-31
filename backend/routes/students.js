@@ -124,7 +124,7 @@ router.put('/:id/profile', async (req, res) => {
       // Password change — verify current password first
       const valid = await bcrypt.compare(current_password || '', student.password);
       if (!valid) return res.status(401).json({ error: 'Current password is incorrect' });
-      const hashed = await bcrypt.hash(new_password, 10);
+      const hashed = await bcrypt.hash(new_password, 12);
       await db.query(
         `UPDATE students
          SET first_name=?, last_name=?, email=?, phone=?, password=?

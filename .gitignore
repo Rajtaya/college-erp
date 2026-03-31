@@ -22,6 +22,10 @@ frontend/dist/
 *.sql
 *.pdf
 
+# Uploaded files (notifications attachments)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
 # Scratch files
 p.txt
 pp.txt

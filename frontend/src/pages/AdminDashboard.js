@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
-import API from '../api';
+import API, { SERVER_BASE } from '../api';
 import SubjectsTab from '../components/SubjectsTab';
 
 export default function AdminDashboard({ admin, onLogout }) {
@@ -41,6 +41,13 @@ export default function AdminDashboard({ admin, onLogout }) {
   const teacherFileRef = useRef();
   const feeFileRef = useRef();
 
+  // Notifications state
+  const [notifications, setNotifications] = useState([]);
+  const [notifForm, setNotifForm] = useState({ title: '', message: '', target: 'all', programme_id: '', target_semester: '' });
+  const [notifFile, setNotifFile] = useState(null);
+  const [notifSending, setNotifSending] = useState(false);
+  const notifFileRef = useRef();
+
   useEffect(() => {
     fetchLevels();
     fetchFaculties();
@@ -57,6 +64,7 @@ export default function AdminDashboard({ admin, onLogout }) {
     if (activeTab === 'fees') { fetchFees(); fetchStudents(); fetchFeeSummary(); autoMarkOverdue(); }
     if (activeTab === 'marks') fetchAllMarks();
     if (activeTab === 'enrollment') { fetchEnrollmentSummary(); setSelectedEnrollStudent(null); }
+    if (activeTab === 'notifications') fetchNotifications();
   }, [activeTab]);
 
   useEffect(() => {
@@ -81,6 +89,45 @@ export default function AdminDashboard({ admin, onLogout }) {
   const autoMarkOverdue = async () => { try { await API.put('/admin/fees/mark-overdue'); } catch(e){} };
   const fetchAllMarks = async () => { try { const r = await API.get('/admin/marks'); setMarks(r.data); } catch(e){} };
   const fetchEnrollmentSummary = async () => { try { const r = await API.get('/admin/enrollment/summary'); setEnrollmentSummary(r.data); } catch(e){} };
+  const fetchNotifications = async () => { try { const r = await API.get('/notifications'); setNotifications(r.data); } catch(e){} };
+
+  const API_BASE = SERVER_BASE;
+
+  const sendNotification = async () => {
+    if (!notifForm.title.trim() || !notifForm.message.trim()) { showMsg('Title and message are required', 'error'); return; }
+    if (notifForm.target === 'class' && (!notifForm.programme_id || !notifForm.target_semester)) {
+      showMsg('Select programme and semester for class-wise notification', 'error'); return;
+    }
+    setNotifSending(true);
+    try {
+      const fd = new FormData();
+      fd.append('title', notifForm.title);
+      fd.append('message', notifForm.message);
+      fd.append('target', notifForm.target);
+      if (notifForm.target === 'class') {
+        fd.append('programme_id', notifForm.programme_id);
+        fd.append('target_semester', notifForm.target_semester);
+      }
+      if (notifFile) fd.append('attachment', notifFile);
+      await API.post('/notifications', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      const prog = notifForm.target === 'class' ? programmes.find(p => String(p.programme_id) === String(notifForm.programme_id)) : null;
+      showMsg(notifForm.target === 'all' ? 'Notification sent to all students!' : `Notification sent to ${prog?.programme_name || ''} Sem ${notifForm.target_semester}!`);
+      setNotifForm({ title: '', message: '', target: 'all', programme_id: '', target_semester: '' });
+      setNotifFile(null);
+      if (notifFileRef.current) notifFileRef.current.value = '';
+      fetchNotifications();
+    } catch (e) { showMsg(e.response?.data?.error || 'Failed to send', 'error'); }
+    setNotifSending(false);
+  };
+
+  const deleteNotification = async (id) => {
+    if (!window.confirm('Delete this notification?')) return;
+    try {
+      await API.delete(`/notifications/${id}`);
+      showMsg('Notification deleted');
+      fetchNotifications();
+    } catch (e) { showMsg('Failed to delete', 'error'); }
+  };
 
   // Helper: build enrollment sheet
   // Format: one column for Code, one for Name, per subject slot
@@ -381,7 +428,6 @@ export default function AdminDashboard({ admin, onLogout }) {
         { key: 'INTERNAL',           label: 'Internal Theory' },
         { key: 'PRACTICAL_INTERNAL', label: 'Practical Internal' },
         { key: 'ASSIGNMENT',         label: 'Assignment' },
-        { key: 'EXTERNAL',           label: 'External' },
       ];
       const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
       semesters.forEach(sem => {
@@ -1225,7 +1271,7 @@ export default function AdminDashboard({ admin, onLogout }) {
     } catch { showMsg('Failed!','error'); } finally { setImporting(false); e.target.value=''; }
   };
 
-  const tabs = ['levels','students','teachers','subjects','enrollment','attendance','fees','marks'];
+  const tabs = ['levels','students','teachers','subjects','enrollment','attendance','fees','marks','notifications'];
   const msgStyle = { ...styles.msg, background: msgType==='error'?'#fff5f5':msgType==='warning'?'#fffbeb':'#c6f6d5', color: msgType==='error'?'#c53030':msgType==='warning'?'#92400e':'#276749' };
 
   return (
@@ -1242,7 +1288,7 @@ export default function AdminDashboard({ admin, onLogout }) {
         {tabs.map(tab => (
           <button key={tab} style={{...styles.tab, ...(activeTab===tab ? styles.activeTab : {})}}
             onClick={() => { setActiveTab(tab); setMsg(''); setForm({}); setStudentLevel(''); setStudentFaculty(''); }}>
-            {tab==='levels'?'🏫 Levels & Faculties':tab.charAt(0).toUpperCase()+tab.slice(1)}
+            {tab==='levels'?'🏫 Levels & Faculties':tab==='notifications'?'🔔 Notifications':tab.charAt(0).toUpperCase()+tab.slice(1)}
           </button>
         ))}
       </div>
@@ -2148,6 +2194,145 @@ export default function AdminDashboard({ admin, onLogout }) {
                 </tr>
               ))}</tbody>
             </table>
+          </div>
+        )}
+
+        {/* NOTIFICATIONS TAB */}
+        {activeTab === 'notifications' && (
+          <div>
+            {/* Send notification form */}
+            <div style={{ background:'#fff', borderRadius:'12px', padding:'1.5rem', boxShadow:'0 2px 8px rgba(0,0,0,0.08)', marginBottom:'1.5rem' }}>
+              <h3 style={{ margin:'0 0 1rem', color:'#2d3748', borderBottom:'2px solid #e2e8f0', paddingBottom:'0.5rem' }}>
+                📢 Send New Notification
+              </h3>
+              <div style={{ display:'grid', gridTemplateColumns: notifForm.target === 'class' ? '1fr 1fr 1fr' : '1fr', gap:'12px', marginBottom:'0.75rem' }}>
+                <div>
+                  <label style={{ display:'block', fontSize:'0.85rem', fontWeight:'600', color:'#4a5568', marginBottom:'4px' }}>Send To *</label>
+                  <select style={{ ...styles.input, width:'100%', boxSizing:'border-box' }}
+                    value={notifForm.target} onChange={e => setNotifForm(p => ({ ...p, target: e.target.value, programme_id: '', target_semester: '' }))}>
+                    <option value="all">All Students</option>
+                    <option value="class">Class-wise (Programme + Semester)</option>
+                  </select>
+                </div>
+                {notifForm.target === 'class' && (
+                  <>
+                    <div>
+                      <label style={{ display:'block', fontSize:'0.85rem', fontWeight:'600', color:'#4a5568', marginBottom:'4px' }}>Programme *</label>
+                      <select style={{ ...styles.input, width:'100%', boxSizing:'border-box' }}
+                        value={notifForm.programme_id} onChange={e => setNotifForm(p => ({ ...p, programme_id: e.target.value }))}>
+                        <option value="">Select programme...</option>
+                        {programmes.map(p => <option key={p.programme_id} value={p.programme_id}>{p.programme_name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display:'block', fontSize:'0.85rem', fontWeight:'600', color:'#4a5568', marginBottom:'4px' }}>Semester *</label>
+                      <select style={{ ...styles.input, width:'100%', boxSizing:'border-box' }}
+                        value={notifForm.target_semester} onChange={e => setNotifForm(p => ({ ...p, target_semester: e.target.value }))}>
+                        <option value="">Select semester...</option>
+                        {[1,2,3,4,5,6,7,8].map(s => <option key={s} value={s}>Semester {s}</option>)}
+                      </select>
+                    </div>
+                  </>
+                )}
+              </div>
+              <div style={{ marginBottom:'0.75rem' }}>
+                <label style={{ display:'block', fontSize:'0.85rem', fontWeight:'600', color:'#4a5568', marginBottom:'4px' }}>Title *</label>
+                <input style={{ ...styles.input, width:'100%', boxSizing:'border-box' }}
+                  placeholder="Notification title..."
+                  value={notifForm.title}
+                  onChange={e => setNotifForm(p => ({ ...p, title: e.target.value }))}
+                  maxLength={200}
+                />
+              </div>
+              <div style={{ marginBottom:'0.75rem' }}>
+                <label style={{ display:'block', fontSize:'0.85rem', fontWeight:'600', color:'#4a5568', marginBottom:'4px' }}>Message *</label>
+                <textarea
+                  style={{ ...styles.input, width:'100%', boxSizing:'border-box', minHeight:'120px', resize:'vertical', fontFamily:'inherit' }}
+                  placeholder="Type your notification message here..."
+                  value={notifForm.message}
+                  onChange={e => setNotifForm(p => ({ ...p, message: e.target.value }))}
+                  maxLength={5000}
+                />
+                <span style={{ fontSize:'0.75rem', color:'#a0aec0' }}>{notifForm.message.length}/5000</span>
+              </div>
+              <div style={{ marginBottom:'1rem' }}>
+                <label style={{ display:'block', fontSize:'0.85rem', fontWeight:'600', color:'#4a5568', marginBottom:'4px' }}>
+                  Attachment (Image or PDF, max 5MB)
+                </label>
+                <input type="file" ref={notifFileRef}
+                  accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                  onChange={e => setNotifFile(e.target.files[0] || null)}
+                  style={{ fontSize:'0.9rem' }}
+                />
+                {notifFile && (
+                  <div style={{ marginTop:'8px', display:'flex', alignItems:'center', gap:'8px' }}>
+                    <span style={{ fontSize:'0.85rem', color:'#4a5568' }}>
+                      {notifFile.type === 'application/pdf' ? '📄' : '🖼️'} {notifFile.name} ({(notifFile.size / 1024).toFixed(1)} KB)
+                    </span>
+                    <button style={{ background:'none', border:'none', color:'#e53e3e', cursor:'pointer', fontWeight:'700' }}
+                      onClick={() => { setNotifFile(null); if (notifFileRef.current) notifFileRef.current.value = ''; }}>
+                      ✕ Remove
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button
+                style={{ ...styles.addBtn, opacity: notifSending ? 0.6 : 1, padding:'0.7rem 2rem', fontSize:'0.95rem' }}
+                onClick={sendNotification}
+                disabled={notifSending}
+              >
+                {notifSending ? '⏳ Sending...' : notifForm.target === 'all' ? '🔔 Send to All Students' : '🔔 Send to Class'}
+              </button>
+            </div>
+
+            {/* Notifications list */}
+            <h3 style={{ color:'#2d3748' }}>Sent Notifications ({notifications.length})</h3>
+            {notifications.length === 0 ? (
+              <div style={{ background:'#fff', padding:'3rem', textAlign:'center', borderRadius:'12px', color:'#718096' }}>
+                No notifications sent yet.
+              </div>
+            ) : (
+              notifications.map(n => (
+                <div key={n.notification_id} style={{ background:'#fff', borderRadius:'10px', boxShadow:'0 2px 8px rgba(0,0,0,0.08)', marginBottom:'1rem', overflow:'hidden' }}>
+                  <div style={{ padding:'1rem 1.25rem', borderBottom:'1px solid #e2e8f0', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                    <div>
+                      <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                        <h4 style={{ margin:0, color:'#2d3748' }}>{n.title}</h4>
+                        <span style={{ fontSize:'0.7rem', fontWeight:'600', padding:'2px 8px', borderRadius:'999px', color:'#fff',
+                          background: n.target === 'all' ? '#4c51bf' : '#d97706' }}>
+                          {n.target === 'all' ? 'All Students' : `${n.programme_name} — Sem ${n.target_semester}`}
+                        </span>
+                      </div>
+                      <span style={{ fontSize:'0.8rem', color:'#a0aec0' }}>
+                        by {n.admin_name || 'Admin'} · {new Date(n.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                    <button style={styles.delBtn} onClick={() => deleteNotification(n.notification_id)}>Delete</button>
+                  </div>
+                  <div style={{ padding:'1rem 1.25rem' }}>
+                    <p style={{ margin:0, color:'#4a5568', whiteSpace:'pre-wrap', lineHeight:'1.6' }}>{n.message}</p>
+                    {n.attachment_url && (
+                      <div style={{ marginTop:'0.75rem', padding:'0.75rem', background:'#f7fafc', borderRadius:'8px', border:'1px solid #e2e8f0' }}>
+                        {n.attachment_type === 'image' ? (
+                          <div>
+                            <img src={`${API_BASE}${n.attachment_url}`} alt="attachment"
+                              style={{ maxWidth:'100%', maxHeight:'300px', borderRadius:'6px', cursor:'pointer' }}
+                              onClick={() => window.open(`${API_BASE}${n.attachment_url}`, '_blank')}
+                            />
+                            <div style={{ fontSize:'0.8rem', color:'#718096', marginTop:'4px' }}>{n.attachment_name}</div>
+                          </div>
+                        ) : (
+                          <a href={`${API_BASE}${n.attachment_url}`} target="_blank" rel="noopener noreferrer"
+                            style={{ display:'inline-flex', alignItems:'center', gap:'6px', color:'#2b6cb0', fontWeight:'600', textDecoration:'none' }}>
+                            📄 {n.attachment_name || 'Download PDF'}
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         )}
       </div>

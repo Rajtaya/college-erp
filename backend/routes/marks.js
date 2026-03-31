@@ -2,26 +2,13 @@ const express = require('express');
 const router = require('express').Router();
 const db = require('../db');
 const { verify } = require('../middleware/auth');
+const { assertTeacherOwnsSubject } = require('../middleware/subjectAuth');
 
 router.use(verify());
 
 // Visibility rules — which exam types are visible to students
 const STUDENT_VISIBLE = new Set(['INTERNAL','ASSIGNMENT','PRACTICAL_INTERNAL']);
-const VALID_EXAM_TYPES = new Set(['INTERNAL','ASSIGNMENT','PRACTICAL_INTERNAL','EXTERNAL','PRACTICAL_EXTERNAL']);
-
-// Helper: verify teacher is assigned to the subject (admin bypasses)
-async function assertTeacherOwnsSubject(req, res, subject_id) {
-  if (req.user.role === 'admin') return true;
-  const [rows] = await db.query(
-    'SELECT 1 FROM subject_teachers WHERE subject_id = ? AND teacher_id = ?',
-    [subject_id, req.user.id]
-  );
-  if (!rows.length) {
-    res.status(403).json({ error: 'You are not assigned to this subject' });
-    return false;
-  }
-  return true;
-}
+const VALID_EXAM_TYPES = new Set(['INTERNAL','ASSIGNMENT','PRACTICAL_INTERNAL']);
 
 // Validate marks value
 function validateMarks(obtained, max) {
@@ -192,6 +179,12 @@ router.get('/student/:student_id/detailed', async (req, res) => {
 // PUT /:mark_id — Update marks
 router.put('/:mark_id', verify('teacher', 'admin'), async (req, res) => {
   const { marks_obtained, max_marks, exam_type } = req.body;
+  if (exam_type && !VALID_EXAM_TYPES.has(exam_type))
+    return res.status(400).json({ error: `Invalid exam_type. Must be one of: ${[...VALID_EXAM_TYPES].join(', ')}` });
+  if (marks_obtained != null && max_marks != null) {
+    const marksErr = validateMarks(marks_obtained, max_marks);
+    if (marksErr) return res.status(400).json({ error: marksErr });
+  }
   try {
     const [result] = await db.query(
       `UPDATE marks SET

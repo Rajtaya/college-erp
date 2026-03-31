@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import API from '../api';
+import React, { useState, useEffect, useRef } from 'react';
+import API, { SERVER_BASE } from '../api';
 
 export default function TeacherDashboard({ teacher, onLogout }) {
   const [activeTab, setActiveTab] = useState('subjects');
@@ -27,6 +27,13 @@ export default function TeacherDashboard({ teacher, onLogout }) {
   const [examType, setExamType] = useState('INTERNAL');
   const [viewMarksSubject, setViewMarksSubject] = useState('');
   const [viewMarks, setViewMarks] = useState([]);
+
+  // Notifications state
+  const [notifications, setNotifications] = useState([]);
+  const [notifForm, setNotifForm] = useState({ title: '', message: '', subject_id: '', target: 'subject', programme_id: '', target_semester: '' });
+  const [notifFile, setNotifFile] = useState(null);
+  const [notifSending, setNotifSending] = useState(false);
+  const notifFileRef = useRef();
 
   useEffect(() => { fetchSubjects(); fetchAllSubjects(); fetchProgrammes(); }, []);
 
@@ -123,7 +130,6 @@ export default function TeacherDashboard({ teacher, onLogout }) {
     if (type === 'INTERNAL') return sub?.internal_marks || 30;
     if (type === 'ASSIGNMENT') return 10;
     if (type === 'PRACTICAL_INTERNAL') return 20;
-    if (type === 'EXTERNAL') return sub?.end_term_marks || 70;
     return 30;
   };
 
@@ -150,6 +156,102 @@ export default function TeacherDashboard({ teacher, onLogout }) {
       const r = await API.get(`/marks/subject/${viewMarksSubject}`);
       setViewMarks(r.data);
     } catch(e) { showMsg('Failed to load marks', 'error'); }
+  };
+
+  // Notifications
+  const NOTIF_API_BASE = SERVER_BASE;
+
+  const fetchNotifications = async () => {
+    try { const r = await API.get('/notifications/teacher/my'); setNotifications(r.data); }
+    catch(e) {}
+  };
+
+  const sendNotification = async () => {
+    if (!notifForm.title.trim() || !notifForm.message.trim()) { showMsg('Title and message are required', 'error'); return; }
+    if (notifForm.target === 'subject' && !notifForm.subject_id) { showMsg('Please select a subject', 'error'); return; }
+    if (notifForm.target === 'class' && (!notifForm.programme_id || !notifForm.target_semester)) {
+      showMsg('Select programme and semester for class-wise notice', 'error'); return;
+    }
+    setNotifSending(true);
+    try {
+      const fd = new FormData();
+      fd.append('title', notifForm.title);
+      fd.append('message', notifForm.message);
+      fd.append('target', notifForm.target);
+      if (notifForm.target === 'subject') fd.append('subject_id', notifForm.subject_id);
+      if (notifForm.target === 'class') {
+        fd.append('programme_id', notifForm.programme_id);
+        fd.append('target_semester', notifForm.target_semester);
+      }
+      if (notifFile) fd.append('attachment', notifFile);
+      await API.post('/notifications', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+      showMsg('Notice sent to students!');
+      setNotifForm({ title: '', message: '', subject_id: '', target: 'subject', programme_id: '', target_semester: '' });
+      setNotifFile(null);
+      if (notifFileRef.current) notifFileRef.current.value = '';
+      fetchNotifications();
+    } catch (e) { showMsg(e.response?.data?.error || 'Failed to send', 'error'); }
+    setNotifSending(false);
+  };
+
+  const deleteNotification = async (id) => {
+    if (!window.confirm('Delete this notice?')) return;
+    try {
+      await API.delete(`/notifications/${id}`);
+      showMsg('Notice deleted');
+      fetchNotifications();
+    } catch (e) { showMsg('Failed to delete', 'error'); }
+  };
+
+  // CSV export helper
+  const downloadCSV = (filename, headers, rows) => {
+    const escape = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+    const csv = [...(headers ? [headers.map(escape).join(',')] : []), ...rows.map(r => r.map(escape).join(','))].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(link.href);
+  };
+
+  const exportAttendance = () => {
+    if (!attStudents.length) { showMsg('No attendance data to export', 'error'); return; }
+    const sub = subjects.find(s => String(s.subject_id) === String(attSubject));
+    const className = sub ? `${sub.subject_code} — ${sub.subject_name} (Sec ${sub.section})` : '';
+    const rows = [
+      ['Class', className, ''],
+      ['Date', attDate, ''],
+      ['Roll No', 'Student Name', 'Status'],
+      ...attStudents.map(s => [s.roll_no, s.name, s.status])
+    ];
+    downloadCSV(`attendance_${sub?.subject_code || attSubject}_${attDate}.csv`, null, rows);
+    showMsg(`Exported attendance for ${attStudents.length} students`);
+  };
+
+  const exportMarks = () => {
+    if (!viewMarks.length) { showMsg('No marks data to export', 'error'); return; }
+    const sub = subjects.find(s => String(s.subject_id) === String(viewMarksSubject));
+    const studentMap = {};
+    viewMarks.forEach(m => {
+      if (!studentMap[m.student_id]) studentMap[m.student_id] = { name: m.name, roll_no: m.roll_no, marks: {} };
+      studentMap[m.student_id].marks[m.exam_type] = { obtained: m.marks_obtained, max: m.max_marks };
+    });
+    const className = sub ? `${sub.subject_code} — ${sub.subject_name} (Sec ${sub.section})` : '';
+    const titleRow = ['Class', className, '', ''];
+    const headers = ['Roll No', 'Name', 'Internal', 'Out of'];
+    const rows = [
+      titleRow,
+      headers,
+      ...Object.values(studentMap).map(stu => [
+        stu.roll_no,
+        stu.name,
+        stu.marks.INTERNAL ? stu.marks.INTERNAL.obtained : '',
+        stu.marks.INTERNAL ? stu.marks.INTERNAL.max : ''
+      ])
+    ];
+    downloadCSV(`marks_${sub?.subject_code || viewMarksSubject}.csv`, null, rows);
+    showMsg(`Exported marks for ${Object.keys(studentMap).length} students`);
   };
 
   // Group assignments by subject
@@ -179,9 +281,9 @@ export default function TeacherDashboard({ teacher, onLogout }) {
       </nav>
 
       <div style={st.tabs}>
-        {['subjects','attendance','marks'].map(tab => (
-          <button key={tab} style={{ ...st.tab, ...(activeTab===tab?st.activeTab:{}) }} onClick={() => setActiveTab(tab)}>
-            {tab==='subjects'?'📚 My Subjects':tab==='attendance'?'📅 Attendance':'📊 Marks'}
+        {['subjects','attendance','marks','notices'].map(tab => (
+          <button key={tab} style={{ ...st.tab, ...(activeTab===tab?st.activeTab:{}) }} onClick={() => { setActiveTab(tab); if (tab==='notices') fetchNotifications(); }}>
+            {tab==='subjects'?'📚 My Subjects':tab==='attendance'?'📅 Attendance':tab==='marks'?'📊 Marks':'🔔 Notices'}
           </button>
         ))}
       </div>
@@ -310,7 +412,10 @@ export default function TeacherDashboard({ teacher, onLogout }) {
                     </tr>
                   ))}</tbody>
                 </table>
-                <button style={st.saveBtn} onClick={submitAttendance}>💾 Save Attendance</button>
+                <div style={{ display:'flex', gap:'12px', marginTop:'1rem' }}>
+                  <button style={st.saveBtn} onClick={submitAttendance}>💾 Save Attendance</button>
+                  <button style={{ ...st.saveBtn, background:'#2b6cb0' }} onClick={exportAttendance}>📥 Export CSV</button>
+                </div>
               </div>
             )}
           </div>
@@ -336,7 +441,6 @@ export default function TeacherDashboard({ teacher, onLogout }) {
                     <option value="INTERNAL">📝 Internal Exam</option>
                     <option value="ASSIGNMENT">📋 Assignment</option>
                     <option value="PRACTICAL_INTERNAL">🔬 Practical Internal</option>
-                    <option value="EXTERNAL">📄 External (End Term)</option>
                   </select>
                 </div>
                 <button style={st.loadBtn} onClick={loadClassMarks} disabled={marksLoading}>
@@ -421,7 +525,10 @@ export default function TeacherDashboard({ teacher, onLogout }) {
                     {subjects.map(s=><option key={s.assignment_id} value={s.subject_id}>{s.subject_code} — {s.subject_name}</option>)}
                   </select>
                 </div>
-                <button style={st.loadBtn} onClick={loadViewMarks}>🔄 Load</button>
+                <div style={{ display:'flex', gap:'8px' }}>
+                  <button style={st.loadBtn} onClick={loadViewMarks}>🔄 Load</button>
+                  {viewMarks.length > 0 && <button style={{ ...st.loadBtn, background:'#2b6cb0' }} onClick={exportMarks}>📥 Export CSV</button>}
+                </div>
               </div>
 
               {viewMarks.length > 0 && (() => {
@@ -431,7 +538,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
                   if (!studentMap[m.student_id]) studentMap[m.student_id] = { name:m.name, roll_no:m.roll_no, marks:{} };
                   studentMap[m.student_id].marks[m.exam_type] = { obtained: m.marks_obtained, max: m.max_marks };
                 });
-                const examTypes = ['INTERNAL','ASSIGNMENT','PRACTICAL_INTERNAL','EXTERNAL'];
+                const examTypes = ['INTERNAL','ASSIGNMENT','PRACTICAL_INTERNAL'];
                 const presentTypes = examTypes.filter(t => viewMarks.some(m => m.exam_type === t));
                 return (
                   <table style={st.table}>
@@ -441,7 +548,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
                         <th style={st.th}>Student</th>
                         {presentTypes.map(t=>(
                           <th key={t} style={st.th}>
-                            {t==='INTERNAL'?'Internal':t==='ASSIGNMENT'?'Assignment':t==='PRACTICAL_INTERNAL'?'Practical':t==='EXTERNAL'?'External':t}
+                            {t==='INTERNAL'?'Internal':t==='ASSIGNMENT'?'Assignment':t==='PRACTICAL_INTERNAL'?'Practical':t}
                           </th>
                         ))}
                         <th style={st.th}>Total %</th>
@@ -474,6 +581,145 @@ export default function TeacherDashboard({ teacher, onLogout }) {
                 );
               })()}
             </div>
+          </div>
+        )}
+
+        {/* NOTICES TAB */}
+        {activeTab === 'notices' && (
+          <div>
+            {/* Send notice form */}
+            <div style={st.card}>
+              <h3 style={st.cardTitle}>📢 Send Notice to Students</h3>
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'0.75rem' }}>
+                <div>
+                  <label style={st.label}>Send To *</label>
+                  <select style={st.select} value={notifForm.target}
+                    onChange={e => setNotifForm(p => ({ ...p, target: e.target.value, subject_id: '', programme_id: '', target_semester: '' }))}>
+                    <option value="subject">Subject-wise (Enrolled Students)</option>
+                    <option value="class">Class-wise (Programme + Semester)</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={st.label}>Title *</label>
+                  <input style={st.input} placeholder="Notice title..." value={notifForm.title}
+                    onChange={e => setNotifForm(p => ({ ...p, title: e.target.value }))} maxLength={200} />
+                </div>
+              </div>
+              {notifForm.target === 'subject' && (
+                <div style={{ marginBottom:'0.75rem' }}>
+                  <label style={st.label}>Subject *</label>
+                  <select style={st.select} value={notifForm.subject_id} onChange={e => setNotifForm(p => ({ ...p, subject_id: e.target.value }))}>
+                    <option value="">Select subject...</option>
+                    {subjects.map(s => (
+                      <option key={s.assignment_id} value={s.subject_id}>
+                        {s.subject_code} — {s.subject_name} (Sec {s.section})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              {notifForm.target === 'class' && (
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'0.75rem' }}>
+                  <div>
+                    <label style={st.label}>Programme *</label>
+                    <select style={st.select} value={notifForm.programme_id} onChange={e => setNotifForm(p => ({ ...p, programme_id: e.target.value }))}>
+                      <option value="">Select programme...</option>
+                      {programmes.map(p => <option key={p.programme_id} value={p.programme_id}>{p.programme_name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label style={st.label}>Semester *</label>
+                    <select style={st.select} value={notifForm.target_semester} onChange={e => setNotifForm(p => ({ ...p, target_semester: e.target.value }))}>
+                      <option value="">Select semester...</option>
+                      {[1,2,3,4,5,6,7,8].map(s => <option key={s} value={s}>Semester {s}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
+              <div style={{ marginBottom:'0.75rem' }}>
+                <label style={st.label}>Message *</label>
+                <textarea style={{ ...st.input, minHeight:'100px', resize:'vertical', fontFamily:'inherit' }}
+                  placeholder="Type your notice here..."
+                  value={notifForm.message}
+                  onChange={e => setNotifForm(p => ({ ...p, message: e.target.value }))}
+                  maxLength={5000} />
+                <span style={{ fontSize:'0.75rem', color:'#a0aec0' }}>{notifForm.message.length}/5000</span>
+              </div>
+              <div style={{ marginBottom:'1rem' }}>
+                <label style={st.label}>Attachment (Image or PDF, max 5MB)</label>
+                <input type="file" ref={notifFileRef}
+                  accept="image/jpeg,image/png,image/gif,image/webp,application/pdf"
+                  onChange={e => setNotifFile(e.target.files[0] || null)}
+                  style={{ fontSize:'0.9rem' }} />
+                {notifFile && (
+                  <div style={{ marginTop:'8px', display:'flex', alignItems:'center', gap:'8px' }}>
+                    <span style={{ fontSize:'0.85rem', color:'#4a5568' }}>
+                      {notifFile.type === 'application/pdf' ? '📄' : '🖼️'} {notifFile.name} ({(notifFile.size / 1024).toFixed(1)} KB)
+                    </span>
+                    <button style={{ background:'none', border:'none', color:'#e53e3e', cursor:'pointer', fontWeight:'700' }}
+                      onClick={() => { setNotifFile(null); if (notifFileRef.current) notifFileRef.current.value = ''; }}>
+                      ✕ Remove
+                    </button>
+                  </div>
+                )}
+              </div>
+              <button style={{ ...st.saveBtn, opacity: notifSending ? 0.6 : 1 }}
+                onClick={sendNotification} disabled={notifSending}>
+                {notifSending ? '⏳ Sending...' : '🔔 Send Notice'}
+              </button>
+            </div>
+
+            {/* Sent notices list */}
+            <h3 style={{ color:'#2d3748' }}>My Sent Notices ({notifications.length})</h3>
+            {notifications.length === 0 ? (
+              <div style={{ background:'#fff', padding:'3rem', textAlign:'center', borderRadius:'12px', color:'#718096' }}>
+                No notices sent yet.
+              </div>
+            ) : (
+              notifications.map(n => (
+                <div key={n.notification_id} style={{ background:'#fff', borderRadius:'10px', boxShadow:'0 2px 8px rgba(0,0,0,0.08)', marginBottom:'1rem', overflow:'hidden' }}>
+                  <div style={{ padding:'1rem 1.25rem', borderBottom:'1px solid #e2e8f0', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                    <div>
+                      <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                        <h4 style={{ margin:0, color:'#2d3748' }}>{n.title}</h4>
+                        <span style={{ fontSize:'0.7rem', fontWeight:'600', padding:'2px 8px', borderRadius:'999px', color:'#fff',
+                          background: n.target === 'subject' ? '#38a169' : '#d97706' }}>
+                          {n.target === 'subject' ? 'Subject' : 'Class'}
+                        </span>
+                      </div>
+                      <span style={{ fontSize:'0.8rem', color:'#a0aec0' }}>
+                        {n.target === 'subject'
+                          ? `${n.subject_code} — ${n.subject_name}`
+                          : `${n.programme_name} — Sem ${n.target_semester}`}
+                        {' · '}{new Date(n.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                    <button style={{ background:'#e53e3e', color:'#fff', border:'none', padding:'0.3rem 0.75rem', borderRadius:'4px', cursor:'pointer' }}
+                      onClick={() => deleteNotification(n.notification_id)}>Delete</button>
+                  </div>
+                  <div style={{ padding:'1rem 1.25rem' }}>
+                    <p style={{ margin:0, color:'#4a5568', whiteSpace:'pre-wrap', lineHeight:'1.6' }}>{n.message}</p>
+                    {n.attachment_url && (
+                      <div style={{ marginTop:'0.75rem', padding:'0.75rem', background:'#f7fafc', borderRadius:'8px', border:'1px solid #e2e8f0' }}>
+                        {n.attachment_type === 'image' ? (
+                          <div>
+                            <img src={`${NOTIF_API_BASE}${n.attachment_url}`} alt="attachment"
+                              style={{ maxWidth:'100%', maxHeight:'300px', borderRadius:'6px', cursor:'pointer' }}
+                              onClick={() => window.open(`${NOTIF_API_BASE}${n.attachment_url}`, '_blank')} />
+                            <div style={{ fontSize:'0.8rem', color:'#718096', marginTop:'4px' }}>{n.attachment_name}</div>
+                          </div>
+                        ) : (
+                          <a href={`${NOTIF_API_BASE}${n.attachment_url}`} target="_blank" rel="noopener noreferrer"
+                            style={{ display:'inline-flex', alignItems:'center', gap:'6px', color:'#2b6cb0', fontWeight:'600', textDecoration:'none' }}>
+                            📄 {n.attachment_name || 'Download PDF'}
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         )}
       </div>

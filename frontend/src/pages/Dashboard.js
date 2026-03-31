@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import API from '../api';
+import API, { SERVER_BASE } from '../api';
 import StudentEnrollment from './StudentEnrollment';
 
 export default function Dashboard({ student, onLogout, onStudentUpdate }) {
@@ -21,12 +21,14 @@ export default function Dashboard({ student, onLogout, onStudentUpdate }) {
   const [enrollmentSummary, setEnrollmentSummary] = useState(null);
   const [loading, setLoading] = useState(false);
   const [showEnrollment, setShowEnrollment] = useState(false);
+  const [notifications, setNotifications] = useState([]);
 
   useEffect(() => {
     if (activeTab === 'attendance') fetchAttendance();
     if (activeTab === 'subjects') fetchEnrollmentSummary();
     if (activeTab === 'fees') fetchFees();
     if (activeTab === 'marks') fetchMarks();
+    if (activeTab === 'notifications') fetchNotifications();
   }, [activeTab]);
 
   useEffect(() => { fetchEnrollmentSummary(); }, []);
@@ -35,6 +37,13 @@ export default function Dashboard({ student, onLogout, onStudentUpdate }) {
     try { const r = await API.get(`/marks/student/${student.student_id}`); setMarks(r.data); }
     catch(e) {}
   };
+
+  const fetchNotifications = async () => {
+    try { const r = await API.get('/notifications/student/all'); setNotifications(r.data); }
+    catch(e) {}
+  };
+
+  const NOTIF_API_BASE = SERVER_BASE;
 
   const printFeeReceipt = (fee) => {
     const html = `
@@ -213,10 +222,10 @@ export default function Dashboard({ student, onLogout, onStudentUpdate }) {
           </div>
         )}
 
-        {['overview','subjects','attendance','fees','marks','profile'].map(tab => (
+        {['overview','subjects','attendance','fees','marks','notifications','profile'].map(tab => (
           <button key={tab} style={{...styles.tab, ...(activeTab===tab?styles.activeTab:{})}}
             onClick={() => setActiveTab(tab)}>
-            {tab==='overview'?'🏠 Overview':tab==='subjects'?'📚 My Subjects':tab==='attendance'?'📅 Attendance':tab==='fees'?'💰 Fees':tab==='marks'?'📊 Marks':'👤 Profile'}
+            {tab==='overview'?'🏠 Overview':tab==='subjects'?'📚 My Subjects':tab==='attendance'?'📅 Attendance':tab==='fees'?'💰 Fees':tab==='marks'?'📊 Marks':tab==='notifications'?'🔔 Notices':'👤 Profile'}
           </button>
         ))}
       </div>
@@ -667,6 +676,63 @@ export default function Dashboard({ student, onLogout, onStudentUpdate }) {
                   </tr>
                 ))}</tbody>
               </table>
+            )}
+          </div>
+        )}
+
+        {/* NOTIFICATIONS TAB */}
+        {activeTab === 'notifications' && (
+          <div>
+            <h2 style={{ margin:'0 0 1.5rem', color:'#2d3748' }}>🔔 Notifications</h2>
+            {notifications.length === 0 ? (
+              <div style={{ background:'#fff', padding:'3rem', textAlign:'center', borderRadius:'12px', color:'#718096' }}>
+                No notifications yet.
+              </div>
+            ) : (
+              notifications.map(n => (
+                <div key={n.notification_id} style={{ background:'#fff', borderRadius:'10px', boxShadow:'0 2px 8px rgba(0,0,0,0.08)', marginBottom:'1rem', overflow:'hidden' }}>
+                  <div style={{ padding:'1rem 1.25rem', borderBottom:'1px solid #e2e8f0', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                    <div>
+                      <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
+                        <h4 style={{ margin:0, color:'#2d3748' }}>{n.title}</h4>
+                        <span style={{ fontSize:'0.7rem', fontWeight:'600', padding:'2px 8px', borderRadius:'999px', color:'#fff',
+                          background: n.sender_role === 'admin' ? '#4c51bf' : '#38a169' }}>
+                          {n.sender_role === 'admin' ? 'Admin' : 'Teacher'}
+                        </span>
+                      </div>
+                      <span style={{ fontSize:'0.8rem', color:'#a0aec0' }}>
+                        {n.sender_role === 'teacher'
+                          ? `${n.teacher_name} · ${n.target === 'subject' ? `${n.subject_code} — ${n.subject_name}` : `${n.programme_name} — Sem ${n.target_semester}`} · `
+                          : n.sender_role === 'admin' && n.target === 'class'
+                          ? `${n.admin_name || 'Admin'} · ${n.programme_name} — Sem ${n.target_semester} · `
+                          : n.admin_name ? `${n.admin_name} · ` : ''}
+                        {new Date(n.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                  <div style={{ padding:'1rem 1.25rem' }}>
+                    <p style={{ margin:0, color:'#4a5568', whiteSpace:'pre-wrap', lineHeight:'1.6' }}>{n.message}</p>
+                    {n.attachment_url && (
+                      <div style={{ marginTop:'0.75rem', padding:'0.75rem', background:'#f7fafc', borderRadius:'8px', border:'1px solid #e2e8f0' }}>
+                        {n.attachment_type === 'image' ? (
+                          <div>
+                            <img src={`${NOTIF_API_BASE}${n.attachment_url}`} alt="attachment"
+                              style={{ maxWidth:'100%', maxHeight:'300px', borderRadius:'6px', cursor:'pointer' }}
+                              onClick={() => window.open(`${NOTIF_API_BASE}${n.attachment_url}`, '_blank')}
+                            />
+                            <div style={{ fontSize:'0.8rem', color:'#718096', marginTop:'4px' }}>{n.attachment_name}</div>
+                          </div>
+                        ) : (
+                          <a href={`${NOTIF_API_BASE}${n.attachment_url}`} target="_blank" rel="noopener noreferrer"
+                            style={{ display:'inline-flex', alignItems:'center', gap:'6px', color:'#2b6cb0', fontWeight:'600', textDecoration:'none' }}>
+                            📄 {n.attachment_name || 'Download PDF'}
+                          </a>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
             )}
           </div>
         )}

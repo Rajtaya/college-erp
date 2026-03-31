@@ -2,6 +2,7 @@ const express = require('express');
 const cors    = require('cors');
 const helmet  = require('helmet');
 const rateLimit = require('express-rate-limit');
+const path    = require('path');
 require('dotenv').config();
 
 const app  = express();
@@ -37,7 +38,8 @@ app.use(cors({
 }));
 
 // ── Body parsing ─────────────────────────────────────────────────────────────
-app.use(express.json({ limit: '2mb' })); // reduced from 5mb; Excel imports are small
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ extended: true, limit: '2mb' }));
 
 // ── Rate limiters ────────────────────────────────────────────────────────────
 const loginLimiter = rateLimit({
@@ -77,6 +79,10 @@ app.use('/api/faculties',   require('./routes/faculties'));
 app.use('/api/enrollment',  require('./routes/enrollment'));
 app.use('/api/disciplines', require('./routes/disciplines'));
 app.use('/api/departments', require('./routes/departments'));
+app.use('/api/notifications', require('./routes/notifications'));
+
+// Serve uploaded files (notifications attachments)
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ── Global error handler ─────────────────────────────────────────────────────
 app.use((err, req, res, next) => {

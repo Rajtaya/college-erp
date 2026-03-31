@@ -238,7 +238,9 @@ router.delete('/teachers/:id', async (req, res) => {
     const [check] = await db.query('SELECT teacher_id, email FROM teachers WHERE teacher_id = ?', [id]);
     if (!check.length) return res.status(404).json({ error: 'Teacher not found' });
     await db.query('UPDATE attendance SET teacher_id = NULL WHERE teacher_id = ?', [id]);
+    await db.query('DELETE FROM teacher_disciplines WHERE teacher_id = ?', [id]);
     await db.query('DELETE FROM teacher_departments WHERE teacher_id = ?', [id]);
+    await db.query('DELETE FROM subject_teachers WHERE teacher_id = ?', [id]);
     await db.query('DELETE FROM teachers WHERE teacher_id = ?', [id]);
     auditLog(req, 'DELETE_TEACHER', 'teachers', id, { email: check[0].email });
     res.json({ message: 'Teacher deleted' });
@@ -339,8 +341,8 @@ router.get('/attendance/summary', async (req, res) => {
              COUNT(a.attendance_id) as total_classes,
              SUM(CASE WHEN a.status = 'PRESENT' THEN 1 ELSE 0 END) as present,
              SUM(CASE WHEN a.status = 'ABSENT'  THEN 1 ELSE 0 END) as absent,
-             SUM(CASE WHEN a.status = 'LATE'    THEN 1 ELSE 0 END) as late,
-             ROUND((SUM(CASE WHEN a.status IN ('PRESENT','LATE') THEN 1 ELSE 0 END) / COUNT(a.attendance_id)) * 100, 1) as attendance_pct
+             SUM(CASE WHEN a.status = 'LEAVE'   THEN 1 ELSE 0 END) as on_leave,
+             ROUND((SUM(CASE WHEN a.status = 'PRESENT' THEN 1 ELSE 0 END) / COUNT(a.attendance_id)) * 100, 1) as attendance_pct
       FROM attendance a
       JOIN students st ON a.student_id = st.student_id
       JOIN subjects sub ON a.subject_id = sub.subject_id
@@ -497,7 +499,8 @@ router.get('/marks/export', async (req, res) => {
 
 router.delete('/marks/:id', async (req, res) => {
   try {
-    await db.query('DELETE FROM marks WHERE mark_id = ?', [req.params.id]);
+    const [result] = await db.query('DELETE FROM marks WHERE mark_id = ?', [req.params.id]);
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Mark record not found' });
     res.json({ message: 'Mark deleted' });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
