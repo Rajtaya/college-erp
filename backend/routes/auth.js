@@ -3,7 +3,7 @@ const router   = express.Router();
 const db       = require('../db');
 const bcrypt   = require('bcryptjs');
 const jwt      = require('jsonwebtoken');
-const { v4: uuidv4 } = require('uuid');
+const crypto   = require('crypto');
 const { verify }     = require('../middleware/auth');
 const blacklist      = require('../middleware/tokenBlacklist');
 require('dotenv').config();
@@ -38,7 +38,7 @@ router.post('/student/login', async (req, res) => {
         [upgraded, rows[0].student_id]);
     }
 
-    const jti   = uuidv4();
+    const jti   = crypto.randomUUID();
     const token = jwt.sign(
       { id: rows[0].student_id, role: 'student', jti },
       process.env.JWT_SECRET,
@@ -73,7 +73,7 @@ router.post('/teacher/login', async (req, res) => {
     const valid = await bcrypt.compare(password, rows[0].password);
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
 
-    const jti   = uuidv4();
+    const jti   = crypto.randomUUID();
     const token = jwt.sign(
       { id: rows[0].teacher_id, role: 'teacher', jti },
       process.env.JWT_SECRET,
