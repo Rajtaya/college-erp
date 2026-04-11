@@ -3,7 +3,7 @@ const router    = express.Router();
 const db        = require('../db');
 const bcrypt    = require('bcryptjs');
 const jwt       = require('jsonwebtoken');
-const { v4: uuidv4 } = require('uuid');
+const crypto    = require('crypto');
 const { verify }     = require('../middleware/auth');
 const blacklist      = require('../middleware/tokenBlacklist');
 const { auditLog }   = require('../middleware/audit');
@@ -22,7 +22,7 @@ router.post('/login', async (req, res) => {
     if (!rows.length || !(await bcrypt.compare(password, rows[0].password))) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    const jti   = uuidv4();
+    const jti   = crypto.randomUUID();
     const token = jwt.sign(
       { id: rows[0].admin_id, role: 'admin', jti },
       process.env.JWT_SECRET,
@@ -65,6 +65,7 @@ router.delete('/students/:id', async (req, res) => {
   try {
     const [check] = await db.query('SELECT student_id, roll_no FROM students WHERE student_id = ?', [id]);
     if (!check.length) return res.status(404).json({ error: 'Student not found' });
+    await db.query('DELETE FROM student_disciplines WHERE student_id = ?', [id]);
     await db.query('DELETE FROM student_subject_enrollment WHERE student_id = ?', [id]);
     await db.query('DELETE FROM attendance WHERE student_id = ?', [id]);
     await db.query('DELETE FROM marks WHERE student_id = ?', [id]);
@@ -282,15 +283,25 @@ router.post('/subjects', async (req, res) => {
 
 router.delete('/subjects/:id', async (req, res) => {
   const id = req.params.id;
+  const conn = await db.getConnection();
   try {
-    await db.query('DELETE FROM student_subject_enrollment WHERE subject_id = ?', [id]);
-    await db.query('DELETE FROM attendance WHERE subject_id = ?', [id]);
-    await db.query('DELETE FROM marks WHERE subject_id = ?', [id]);
-    await db.query('DELETE FROM programme_subject_pool WHERE subject_id = ?', [id]);
+    await conn.beginTransaction();
+    await conn.query('DELETE FROM student_subject_enrollment WHERE subject_id = ?', [id]);
+    await conn.query('DELETE FROM attendance WHERE subject_id = ?', [id]);
+    await conn.query('DELETE FROM marks WHERE subject_id = ?', [id]);
+    await conn.query('DELETE FROM notifications WHERE subject_id = ?', [id]);
+    await conn.query('DELETE FROM programme_subject_pool WHERE subject_id = ?', [id]);
     // subject_teachers has ON DELETE CASCADE
-    await db.query('DELETE FROM subjects WHERE subject_id = ?', [id]);
+    await conn.query('DELETE FROM subjects WHERE subject_id = ?', [id]);
+    await conn.commit();
     res.json({ message: 'Subject deleted' });
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+  } catch (err) {
+    await conn.rollback();
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    conn.release();
+  }
 });
 
 // ── ATTENDANCE ────────────────────────────────────────────────────────────────
@@ -342,7 +353,7 @@ router.get('/attendance/summary', async (req, res) => {
              SUM(CASE WHEN a.status = 'PRESENT' THEN 1 ELSE 0 END) as present,
              SUM(CASE WHEN a.status = 'ABSENT'  THEN 1 ELSE 0 END) as absent,
              SUM(CASE WHEN a.status = 'LEAVE'   THEN 1 ELSE 0 END) as on_leave,
-             ROUND((SUM(CASE WHEN a.status = 'PRESENT' THEN 1 ELSE 0 END) / COUNT(a.attendance_id)) * 100, 1) as attendance_pct
+             ROUND((SUM(CASE WHEN a.status = 'PRESENT' THEN 1 ELSE 0 END) / NULLIF(COUNT(a.attendance_id), 0)) * 100, 1) as attendance_pct
       FROM attendance a
       JOIN students st ON a.student_id = st.student_id
       JOIN subjects sub ON a.subject_id = sub.subject_id
@@ -411,7 +422,7 @@ router.get('/fees/summary', async (req, res) => {
        JOIN students s ON f.student_id = s.student_id
        LEFT JOIN programmes p ON s.programme_id = p.programme_id
        LEFT JOIN levels l ON s.level_id = l.level_id
-       GROUP BY p.programme_id
+       GROUP BY p.programme_id, l.level_name, p.programme_name
        ORDER BY l.level_name, p.programme_name`
     );
     res.json(rows);
@@ -485,7 +496,7 @@ router.get('/marks/export', async (req, res) => {
              p.programme_name, l.level_name, st.semester,
              sub.subject_code, sub.subject_name, sub.category, sub.credits,
              m.exam_type, m.marks_obtained, m.max_marks,
-             ROUND((m.marks_obtained / m.max_marks) * 100, 1) as percentage
+             ROUND((m.marks_obtained / NULLIF(m.max_marks, 0)) * 100, 1) as percentage
       FROM marks m
       JOIN students st ON m.student_id = st.student_id
       JOIN subjects sub ON m.subject_id = sub.subject_id
@@ -511,6 +522,7 @@ router.get('/enrollment/summary', async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT st.student_id, st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name,
+              st.programme_id, st.level_id, st.faculty_id,
               p.programme_name, l.level_name, st.semester,
               COUNT(e.enrollment_id) as total_enrolled,
               SUM(CASE WHEN e.status='ACCEPTED' THEN 1 ELSE 0 END) as accepted,
@@ -519,6 +531,7 @@ router.get('/enrollment/summary', async (req, res) => {
               MAX(e.admin_modified) as admin_modified
        FROM students st
        LEFT JOIN student_subject_enrollment e ON st.student_id = e.student_id
+         AND e.subject_id IN (SELECT sub.subject_id FROM subjects sub WHERE sub.semester = st.semester)
        LEFT JOIN programmes p ON st.programme_id = p.programme_id
        LEFT JOIN levels l ON st.level_id = l.level_id
        GROUP BY st.student_id
@@ -606,7 +619,10 @@ router.get('/enrollment/export', async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name,
-             p.programme_name, l.level_name, st.semester,
+             p.programme_id, p.programme_name,
+             p.faculty_id, f.faculty_name,
+             p.level_id, l.level_name,
+             st.semester,
              sub.subject_code, sub.subject_name, sub.category, sub.credits,
              d.discipline_name,
              e.status,
@@ -617,6 +633,7 @@ router.get('/enrollment/export', async (req, res) => {
       JOIN student_subject_enrollment e ON st.student_id = e.student_id
       JOIN subjects sub ON e.subject_id = sub.subject_id
       LEFT JOIN programmes p ON st.programme_id = p.programme_id
+      LEFT JOIN faculties f ON p.faculty_id = f.faculty_id
       LEFT JOIN levels l ON st.level_id = l.level_id
       LEFT JOIN disciplines d ON sub.discipline_id = d.discipline_id
       WHERE e.status = 'ACCEPTED' AND e.is_draft = 0
@@ -673,7 +690,7 @@ router.post('/enrollment/import', async (req, res) => {
   const subMap = Object.fromEntries(subRows.map(s => [s.subject_code.trim(), s.subject_id]));
 
   // ── Pass 3: execute all valid rows inside a single transaction ─────────────
-  let success = 0, failed = errors.length;
+  let success = 0, failed = 0;
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
@@ -713,26 +730,35 @@ router.post('/enrollment/import', async (req, res) => {
 
 router.put('/enrollment/bulkupdate/:student_id', async (req, res) => {
   const { changes, admin_note } = req.body;
+  const conn = await db.getConnection();
   try {
+    await conn.beginTransaction();
     for (const change of changes) {
-      const [existing] = await db.query(
+      const [existing] = await conn.query(
         'SELECT enrollment_id FROM student_subject_enrollment WHERE student_id = ? AND subject_id = ?',
         [req.params.student_id, change.subject_id]
       );
       if (existing.length) {
-        await db.query(
+        await conn.query(
           'UPDATE student_subject_enrollment SET status = ?, admin_modified = 1, is_draft = 0, admin_note = ? WHERE student_id = ? AND subject_id = ?',
           [change.status, admin_note || '', req.params.student_id, change.subject_id]
         );
       } else {
-        await db.query(
+        await conn.query(
           'INSERT INTO student_subject_enrollment (student_id, subject_id, status, admin_modified, admin_note, is_draft) VALUES (?, ?, ?, 1, ?, 0)',
           [req.params.student_id, change.subject_id, change.status, admin_note || 'Added by admin']
         );
       }
     }
+    await conn.commit();
     res.json({ message: `${changes.length} subject(s) updated successfully` });
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+  } catch (err) {
+    await conn.rollback();
+    console.error(err);
+    res.status(500).json({ error: 'Internal server error' });
+  } finally {
+    conn.release();
+  }
 });
 
 router.get('/enrollment/reset-check/:student_id', async (req, res) => {
@@ -753,7 +779,15 @@ router.get('/enrollment/reset-check/:student_id', async (req, res) => {
 
 router.delete('/enrollment/reset/:student_id', async (req, res) => {
   try {
-    await db.query('DELETE FROM student_subject_enrollment WHERE student_id = ?', [req.params.student_id]);
+    // Only reset current semester enrollment, not all semesters
+    const [[student]] = await db.query('SELECT semester FROM students WHERE student_id = ?', [req.params.student_id]);
+    if (!student) return res.status(404).json({ error: 'Student not found' });
+    await db.query(
+      `DELETE e FROM student_subject_enrollment e
+       JOIN subjects s ON e.subject_id = s.subject_id
+       WHERE e.student_id = ? AND s.semester = ?`,
+      [req.params.student_id, student.semester]
+    );
     await db.query('UPDATE students SET enrollment_submitted = 0 WHERE student_id = ?', [req.params.student_id]);
     auditLog(req, 'ENROLLMENT_RESET', 'student_subject_enrollment', req.params.student_id);
     res.json({ message: 'Enrollment reset successfully!' });

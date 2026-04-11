@@ -37,6 +37,15 @@ export default function AdminDashboard({ admin, onLogout }) {
   const [assignmentData, setAssignmentData] = useState([]);
   const [editingAssignment, setEditingAssignment] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [stuFilterProg, setStuFilterProg] = useState('');
+  const [stuFilterSem, setStuFilterSem] = useState('');
+  const [stuFilterFaculty, setStuFilterFaculty] = useState('');
+  const [stuSearch, setStuSearch] = useState('');
+  const [enrollFilterProg, setEnrollFilterProg] = useState('');
+  const [enrollFilterFaculty, setEnrollFilterFaculty] = useState('');
+  const [enrollFilterSem, setEnrollFilterSem] = useState('');
+  const [enrollFilterLevel, setEnrollFilterLevel] = useState('');
+  const [enrollFilterStatus, setEnrollFilterStatus] = useState('');
   const studentFileRef = useRef();
   const teacherFileRef = useRef();
   const feeFileRef = useRef();
@@ -203,12 +212,53 @@ export default function AdminDashboard({ admin, onLogout }) {
     return rows;
   };
 
-  // Export: Programme-wise (one sheet per programme)
+  // ── Enrollment Export: shared cache + filter helper ────────────────
+  const enrollmentExportCacheRef = useRef({ data: null, ts: 0 });
+
+  const fetchEnrollmentExportData = async () => {
+    const CACHE_MS = 60 * 1000;
+    const cache = enrollmentExportCacheRef.current;
+    if (cache.data && Date.now() - cache.ts < CACHE_MS) return cache.data;
+    const r = await API.get('/admin/enrollment/export');
+    enrollmentExportCacheRef.current = { data: r.data, ts: Date.now() };
+    return r.data;
+  };
+
+  // Apply the on-screen Enrollment Management filters to export rows.
+  const applyEnrollmentFilters = (data) => {
+    const search = (enrollSearch || '').trim().toLowerCase();
+    return data.filter(r => {
+      if (search) {
+        const hay = `${r.roll_no || ''} ${r.student_name || ''}`.toLowerCase();
+        if (!hay.includes(search)) return false;
+      }
+      if (enrollFilterFaculty && String(r.faculty_id)   !== String(enrollFilterFaculty)) return false;
+      if (enrollFilterLevel   && String(r.level_id)     !== String(enrollFilterLevel))   return false;
+      if (enrollFilterProg    && String(r.programme_id) !== String(enrollFilterProg))    return false;
+      if (enrollFilterSem     && String(r.semester)     !== String(enrollFilterSem))     return false;
+      // Status filter: dropdown values are 'submitted','draft','not_enrolled'
+      // Export endpoint only returns ACCEPTED (Submitted) rows, so:
+      //   submitted    → all rows pass (already all ACCEPTED)
+      //   draft        → no match (drafts not in export)
+      //   not_enrolled → no match (not-enrolled students not in export)
+      if (enrollFilterStatus === 'draft' || enrollFilterStatus === 'not_enrolled') return false;
+      return true;
+    });
+  };
+
+  const todayStamp = () => new Date().toLocaleDateString('en-IN').replace(/\//g, '-');
+
+  const logExportError = (label, e) => {
+    console.error(`[Export] ${label} failed:`, e);
+    const detail = e?.response?.data?.error || e?.message || 'Unknown error';
+    showMsg(`Export failed: ${detail}`, 'error');
+  };
+
+  // ── Enrollment Export: Programme-wise (one sheet per programme) ────
   const handleExportEnrollment = async () => {
     try {
-      const r = await API.get('/admin/enrollment/export');
-      const data = r.data;
-      if (!data.length) { showMsg('No enrollment data to export', 'error'); return; }
+      const data = applyEnrollmentFilters(await fetchEnrollmentExportData());
+      if (!data.length) { showMsg('No enrollment data matches current filters', 'error'); return; }
 
       const wb = XLSX.utils.book_new();
       const programmes = [...new Set(data.map(d => d.programme_name))].sort();
@@ -219,111 +269,111 @@ export default function AdminDashboard({ admin, onLogout }) {
         if (!rows.length) return;
         const ws = XLSX.utils.json_to_sheet(rows);
         ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 22) }));
-        XLSX.utils.book_append_sheet(wb, ws, prog.replace(/[\/\?*\[\]]/g,'').substring(0,31));
+        XLSX.utils.book_append_sheet(wb, ws, prog.replace(/[\/\?*\[\]]/g, '').substring(0, 31));
       });
 
-      XLSX.writeFile(wb, `Enrollment_Programme_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      XLSX.writeFile(wb, `Enrollment_Programme_${todayStamp()}.xlsx`);
       showMsg('✅ Programme-wise export done!');
-    } catch(e) { showMsg('Export failed', 'error'); }
+    } catch (e) { logExportError('Programme-wise', e); }
   };
 
-  // Export: Semester-wise (one sheet per semester)
-  const handleExportSemesterWise = async () => {
+  // ── Enrollment Export: generic semester-grouped helper ─────────────
+  const exportSemesterGrouped = async (label, filterFn, filenamePrefix, sheetLabelFn, successMsg) => {
     try {
-      const r = await API.get('/admin/enrollment/export');
-      const data = r.data;
-      if (!data.length) { showMsg('No enrollment data to export', 'error'); return; }
+      const data = applyEnrollmentFilters(await fetchEnrollmentExportData()).filter(filterFn);
+      if (!data.length) { showMsg('No enrollment data matches current filters', 'error'); return; }
 
       const wb = XLSX.utils.book_new();
-      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
+      const semesters = [...new Set(data.map(d => d.semester))].sort((a, b) => a - b);
 
       semesters.forEach(sem => {
-        const semData = data.filter(d => d.semester === sem);
-        const rows = buildEnrollmentSheet(semData);
+        const rows = buildEnrollmentSheet(data.filter(d => d.semester === sem));
         if (!rows.length) return;
         const ws = XLSX.utils.json_to_sheet(rows);
         ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 22) }));
-        XLSX.utils.book_append_sheet(wb, ws, `Semester ${sem}`);
+        XLSX.utils.book_append_sheet(wb, ws, sheetLabelFn(sem));
       });
 
-      XLSX.writeFile(wb, `Enrollment_Semester_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
-      showMsg('✅ Semester-wise export done!');
-    } catch(e) { showMsg('Export failed', 'error'); }
+      XLSX.writeFile(wb, `${filenamePrefix}_${todayStamp()}.xlsx`);
+      showMsg(successMsg);
+    } catch (e) { logExportError(label, e); }
   };
 
-  // Export: Odd Semesters (1,3,5,7)
-  const handleExportOddSemesters = async () => {
+  const handleExportSemesterWise = () => exportSemesterGrouped(
+    'Semester-wise', () => true, 'Enrollment_Semester',
+    s => `Semester ${s}`, '✅ Semester-wise export done!'
+  );
+
+  const handleExportOddSemesters = () => exportSemesterGrouped(
+    'Odd-Sem', d => d.semester % 2 !== 0, 'Enrollment_OddSem',
+    s => `Sem ${s} (Odd)`, '✅ Odd semester export done!'
+  );
+
+  const handleExportEvenSemesters = () => exportSemesterGrouped(
+    'Even-Sem', d => d.semester % 2 === 0, 'Enrollment_EvenSem',
+    s => `Sem ${s} (Even)`, '✅ Even semester export done!'
+  );
+
+  // ── Enrollment Import from Excel ───────────────────────────────────
+  const handleImportEnrollment = async (e) => {
+    const file = e.target.files[0]; if (!file) return; setImporting(true);
     try {
-      const r = await API.get('/admin/enrollment/export');
-      const data = r.data.filter(d => d.semester % 2 !== 0);
-      if (!data.length) { showMsg('No odd semester enrollment data', 'error'); return; }
+      const data = await file.arrayBuffer(); const wb = XLSX.read(data);
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+      const enrollments = rows.map(row => {
+        const subjects = [];
+        for (let i = 1; i <= 12; i++) {
+          const code = row[`DSC-${i}`];
+          if (code) subjects.push(String(code).trim());
+        }
+        return { roll_no: String(row.roll_no || ''), subjects };
+      }).filter(r => r.roll_no && r.subjects.length > 0);
 
-      const wb = XLSX.utils.book_new();
-      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
-
-      semesters.forEach(sem => {
-        const semData = data.filter(d => d.semester === sem);
-        const rows = buildEnrollmentSheet(semData);
-        if (!rows.length) return;
-        const ws = XLSX.utils.json_to_sheet(rows);
-        ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 22) }));
-        XLSX.utils.book_append_sheet(wb, ws, `Sem ${sem} (Odd)`);
-      });
-
-      XLSX.writeFile(wb, `Enrollment_OddSem_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
-      showMsg('✅ Odd semester export done!');
-    } catch(e) { showMsg('Export failed', 'error'); }
+      const res = await API.post('/enrollment/bulk-import', { enrollments });
+      const { success, failed, errors } = res.data;
+      if (errors?.length) console.warn('Enrollment import errors:', errors);
+      showMsg(`✅ Enrolled ${success} subjects${failed ? `, ❌ ${failed} students failed` : ''}`, failed ? 'warning' : 'success');
+      fetchEnrollmentSummary();
+    } catch (err) {
+      console.error('[Import] Enrollment failed:', err);
+      showMsg('Import failed: ' + (err.response?.data?.error || err.message), 'error');
+    } finally {
+      setImporting(false); e.target.value = '';
+    }
   };
 
-  // Export: Even Semesters (2,4,6,8)
-  const handleExportEvenSemesters = async () => {
-    try {
-      const r = await API.get('/admin/enrollment/export');
-      const data = r.data.filter(d => d.semester % 2 === 0);
-      if (!data.length) { showMsg('No even semester enrollment data', 'error'); return; }
-
-      const wb = XLSX.utils.book_new();
-      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
-
-      semesters.forEach(sem => {
-        const semData = data.filter(d => d.semester === sem);
-        const rows = buildEnrollmentSheet(semData);
-        if (!rows.length) return;
-        const ws = XLSX.utils.json_to_sheet(rows);
-        ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 22) }));
-        XLSX.utils.book_append_sheet(wb, ws, `Sem ${sem} (Even)`);
-      });
-
-      XLSX.writeFile(wb, `Enrollment_EvenSem_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
-      showMsg('✅ Even semester export done!');
-    } catch(e) { showMsg('Export failed', 'error'); }
-  };
-
-  // ── Enrollment Export Functions ──────────────────────────────────────────
+  // ── Enrollment Export: Summary (uses enrollmentSummary state) ──────
   const exportEnrollmentSummary = () => {
-    const rows = enrollmentSummary.map(s => ({
-      'Roll No': s.roll_no,
-      'Student Name': s.student_name,
-      'Programme': s.programme_name || '—',
-      'Level': s.level_name || '—',
-      'Semester': s.semester,
-      'Status': s.accepted > 0 ? 'Submitted' : s.total_enrolled > 0 ? 'Draft' : 'Not Enrolled',
-      'Total Enrolled': s.total_enrolled || 0,
-      'Accepted': s.accepted || 0,
-      'Rejected': s.rejected || 0,
-      'Pending': s.pending || 0,
-      'Admin Modified': s.admin_modified ? 'Yes' : 'No',
-    }));
-    const ws = XLSX.utils.json_to_sheet(rows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Enrollment Summary');
-    XLSX.writeFile(wb, 'enrollment_summary.xlsx');
+    try {
+      if (!enrollmentSummary?.length) { showMsg('No summary data to export', 'error'); return; }
+      const rows = enrollmentSummary.map(s => ({
+        'Roll No': s.roll_no,
+        'Student Name': s.student_name,
+        'Programme': s.programme_name || '—',
+        'Level': s.level_name || '—',
+        'Semester': s.semester,
+        'Status': s.accepted > 0 ? 'Submitted' : s.total_enrolled > 0 ? 'Draft' : 'Not Enrolled',
+        'Total Enrolled': s.total_enrolled || 0,
+        'Accepted': s.accepted || 0,
+        'Rejected': s.rejected || 0,
+        'Pending': s.pending || 0,
+        'Admin Modified': s.admin_modified ? 'Yes' : 'No',
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Enrollment Summary');
+      XLSX.writeFile(wb, `Enrollment_Summary_${todayStamp()}.xlsx`);
+      showMsg('✅ Summary exported!');
+    } catch (e) { logExportError('Summary', e); }
   };
 
+  // ── Enrollment Export: Full Detail (one row per enrollment) ────────
   const exportEnrollmentDetail = async () => {
     try {
-      const r = await API.get('/admin/enrollment/export');
-      const rows = r.data.map(e => ({
+      const data = applyEnrollmentFilters(await fetchEnrollmentExportData());
+      if (!data.length) { showMsg('No enrollment data matches current filters', 'error'); return; }
+
+      const rows = data.map(e => ({
         'Roll No': e.roll_no,
         'Student Name': e.student_name,
         'Programme': e.programme_name || '—',
@@ -334,15 +384,17 @@ export default function AdminDashboard({ admin, onLogout }) {
         'Category': e.category,
         'Credits': e.credits,
         'Status': e.status || 'NOT ENROLLED',
-        'Is Major': e.is_major ? 'Yes' : 'No',
-        'Admin Modified': e.admin_modified ? 'Yes' : 'No',
+        'Is Major': e.is_major,
+        'Admin Modified': e.admin_modified,
         'Remarks': e.remarks || '',
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
+      ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 18) }));
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Enrollment Detail');
-      XLSX.writeFile(wb, 'enrollment_detail.xlsx');
-    } catch(e) { showMsg('Failed to export', 'error'); }
+      XLSX.writeFile(wb, `Enrollment_Detail_${todayStamp()}.xlsx`);
+      showMsg('✅ Full detail exported!');
+    } catch (e) { logExportError('Full Detail', e); }
   };
 
   // ── Marks Export Functions ─────────────────────────────────────────────────
@@ -411,95 +463,59 @@ export default function AdminDashboard({ admin, onLogout }) {
       const programmes = [...new Set(data.map(d => d.programme_name))].sort();
       programmes.forEach(prog => {
         const progData = data.filter(d => d.programme_name === prog);
-        exportMarksToWorkbook(progData, `Marks_${prog.replace(/[^a-zA-Z0-9]/g,'_')}_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+        exportMarksToWorkbook(progData, `Marks_${prog.replace(/[^a-zA-Z0-9]/g,'_')}_${todayStamp()}.xlsx`);
       });
       showMsg(`✅ Marks exported for ${programmes.length} programme(s)!`);
-    } catch(e) { showMsg('Marks export failed', 'error'); }
+    } catch (e) { logExportError('Marks Programme-wise', e); }
   };
 
-  // Export marks semester-wise (one file, each semester has 3 sheets)
-  const exportMarksSemesterWise = async () => {
+  // ── Marks Export: generic semester-grouped helper ─────────────────
+  // Used by Semester-wise, Odd Sem, and Even Sem marks exports.
+  // One file, one sheet per (semester × exam type) combination.
+  const exportMarksSemesterGrouped = async (label, filterFn, filenamePrefix, successMsg) => {
     try {
       const r = await API.get('/admin/marks/export');
-      const data = r.data;
-      if (!data.length) { showMsg('No marks data to export', 'error'); return; }
+      const data = r.data.filter(filterFn);
+      if (!data.length) { showMsg(`No marks data for ${label}`, 'error'); return; }
+
       const wb = XLSX.utils.book_new();
       const examTypes = [
         { key: 'INTERNAL',           label: 'Internal Theory' },
         { key: 'PRACTICAL_INTERNAL', label: 'Practical Internal' },
         { key: 'ASSIGNMENT',         label: 'Assignment' },
       ];
-      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
+      const semesters = [...new Set(data.map(d => d.semester))].sort((a, b) => a - b);
+
       semesters.forEach(sem => {
         const semData = data.filter(d => d.semester === sem);
-        examTypes.forEach(({ key, label }) => {
+        examTypes.forEach(({ key, label: etLabel }) => {
           const rows = buildMarksSheetByType(semData, key);
           if (!rows.length) return;
           const ws = XLSX.utils.json_to_sheet(rows);
           ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 16) }));
-          XLSX.utils.book_append_sheet(wb, ws, `Sem${sem}-${label.substring(0,18)}`);
+          XLSX.utils.book_append_sheet(wb, ws, `Sem${sem}-${etLabel.substring(0, 18)}`);
         });
       });
-      XLSX.writeFile(wb, `Marks_SemesterWise_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
-      showMsg('✅ Semester-wise marks exported!');
-    } catch(e) { showMsg('Marks export failed', 'error'); }
+
+      XLSX.writeFile(wb, `${filenamePrefix}_${todayStamp()}.xlsx`);
+      showMsg(successMsg);
+    } catch (e) { logExportError(`Marks ${label}`, e); }
   };
 
-  // Export marks odd semesters
-  const exportMarksOddSem = async () => {
-    try {
-      const r = await API.get('/admin/marks/export');
-      const data = r.data.filter(d => d.semester % 2 !== 0);
-      if (!data.length) { showMsg('No odd semester marks data', 'error'); return; }
-      const wb = XLSX.utils.book_new();
-      const examTypes = [
-        { key: 'INTERNAL', label: 'Internal Theory' },
-        { key: 'PRACTICAL_INTERNAL', label: 'Practical Internal' },
-        { key: 'ASSIGNMENT', label: 'Assignment' },
-      ];
-      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
-      semesters.forEach(sem => {
-        const semData = data.filter(d => d.semester === sem);
-        examTypes.forEach(({ key, label }) => {
-          const rows = buildMarksSheetByType(semData, key);
-          if (!rows.length) return;
-          const ws = XLSX.utils.json_to_sheet(rows);
-          ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 16) }));
-          XLSX.utils.book_append_sheet(wb, ws, `Sem${sem}-${label.substring(0,18)}`);
-        });
-      });
-      XLSX.writeFile(wb, `Marks_OddSem_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
-      showMsg('✅ Odd semester marks exported!');
-    } catch(e) { showMsg('Marks export failed', 'error'); }
-  };
+  const exportMarksSemesterWise = () => exportMarksSemesterGrouped(
+    'Semester-wise', () => true, 'Marks_SemesterWise',
+    '✅ Semester-wise marks exported!'
+  );
 
-  // Export marks even semesters
-  const exportMarksEvenSem = async () => {
-    try {
-      const r = await API.get('/admin/marks/export');
-      const data = r.data.filter(d => d.semester % 2 === 0);
-      if (!data.length) { showMsg('No even semester marks data', 'error'); return; }
-      const wb = XLSX.utils.book_new();
-      const examTypes = [
-        { key: 'INTERNAL', label: 'Internal Theory' },
-        { key: 'PRACTICAL_INTERNAL', label: 'Practical Internal' },
-        { key: 'ASSIGNMENT', label: 'Assignment' },
-      ];
-      const semesters = [...new Set(data.map(d => d.semester))].sort((a,b) => a-b);
-      semesters.forEach(sem => {
-        const semData = data.filter(d => d.semester === sem);
-        examTypes.forEach(({ key, label }) => {
-          const rows = buildMarksSheetByType(semData, key);
-          if (!rows.length) return;
-          const ws = XLSX.utils.json_to_sheet(rows);
-          ws['!cols'] = Object.keys(rows[0]).map(k => ({ wch: Math.max(k.length + 2, 16) }));
-          XLSX.utils.book_append_sheet(wb, ws, `Sem${sem}-${label.substring(0,18)}`);
-        });
-      });
-      XLSX.writeFile(wb, `Marks_EvenSem_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
-      showMsg('✅ Even semester marks exported!');
-    } catch(e) { showMsg('Marks export failed', 'error'); }
-  };
+  const exportMarksOddSem = () => exportMarksSemesterGrouped(
+    'Odd-Sem', d => d.semester % 2 !== 0, 'Marks_OddSem',
+    '✅ Odd semester marks exported!'
+  );
+
+  const exportMarksEvenSem = () => exportMarksSemesterGrouped(
+    'Even-Sem', d => d.semester % 2 === 0, 'Marks_EvenSem',
+    '✅ Even semester marks exported!'
+  );
 
   // Per-subject export: Excel + PDF for all students of one programme
   // Shows: Roll No, Name, Internal, Assignment, Practical Internal marks
@@ -557,7 +573,7 @@ export default function AdminDashboard({ admin, onLogout }) {
         XLSX.utils.book_append_sheet(wb, ws, sheetName);
       });
 
-      XLSX.writeFile(wb, `Marks_SubjectWise_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      XLSX.writeFile(wb, `Marks_SubjectWise_${todayStamp()}.xlsx`);
 
       // PDF: one PDF per subject using printable HTML
       subjects.forEach(sub => {
@@ -650,12 +666,12 @@ export default function AdminDashboard({ admin, onLogout }) {
         'Semester': stu.semester,
       };
       subjects.forEach(sub => {
-        const subData = data.filter(d => d.roll_no === stu.roll_no && d.subject_code === sub.subject_code);
-        const total   = subData.total_classes || 0;
-        const present = subData.present || 0;
-        const absent  = subData.absent  || 0;
-        const late    = subData.late    || 0;
-        const pct     = subData.attendance_pct || 0;
+        const rec = data.find(d => d.roll_no === stu.roll_no && d.subject_code === sub.subject_code);
+        const total   = rec?.total_classes || 0;
+        const present = rec?.present || 0;
+        const absent  = rec?.absent  || 0;
+        const late    = rec?.late    || 0;
+        const pct     = rec?.attendance_pct || 0;
         row[`${sub.subject_code} Present`] = present;
         row[`${sub.subject_code} Absent`]  = absent;
         row[`${sub.subject_code} Late`]    = late;
@@ -716,7 +732,7 @@ export default function AdminDashboard({ admin, onLogout }) {
         XLSX.utils.book_append_sheet(wb, ws, prog.replace(/[\/\?*\[\]]/g,'').substring(0,31));
       });
 
-      XLSX.writeFile(wb, `Attendance_Programme_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      XLSX.writeFile(wb, `Attendance_Programme_${todayStamp()}.xlsx`);
       showMsg('✅ Programme-wise attendance exported!');
     } catch(e) { showMsg('Attendance export failed', 'error'); }
   };
@@ -760,7 +776,7 @@ export default function AdminDashboard({ admin, onLogout }) {
         XLSX.utils.book_append_sheet(wb, ws, sub.subject_code.replace(/[\/\?*\[\]]/g,'').substring(0,31));
       });
 
-      XLSX.writeFile(wb, `Attendance_SubjectWise_${new Date().toLocaleDateString('en-IN').replace(/\//g,'-')}.xlsx`);
+      XLSX.writeFile(wb, `Attendance_SubjectWise_${todayStamp()}.xlsx`);
 
       // PDF — one per subject
       subjects.forEach(sub => {
@@ -1180,38 +1196,29 @@ export default function AdminDashboard({ admin, onLogout }) {
       const levelMap = {}; levels.forEach(l => { levelMap[l.level_name.toUpperCase()] = l.level_id; });
       const progMap = {}; programmes.forEach(p => { progMap[p.programme_name.toLowerCase()] = p.programme_id; });
       const facMap = {}; faculties.forEach(f => { facMap[f.faculty_name.toLowerCase()] = f.faculty_id; });
-      let success = 0, failed = 0;
-      for (const row of rows) {
-        try {
-          const studentRes = await API.post('/students', {
-            roll_no: String(row.roll_no||''), name: String(row.name||''),
-            email: String(row.email||''), phone: String(row.phone||''),
-            course: String(row.programme_name||''),
-            semester: Number(row.semester||1), year: Number(row.year||1),
-            password: String(row.password||'password123'),
-            level_id: levelMap[String(row.level_name||'').toUpperCase()] || null,
-            programme_id: progMap[String(row.programme_name||'').toLowerCase()] || null,
-            faculty_id: facMap[String(row.faculty_name||'').toLowerCase()] || null,
-          });
-          // Assign disciplines if provided (Scheme A/B students)
-          const discNames = [row.discipline_1, row.discipline_2, row.discipline_3].filter(Boolean);
-          if (discNames.length > 0 && studentRes.data?.student_id) {
-            const discRes = await API.get('/disciplines');
-            const discMap = {};
-            discRes.data.forEach(d => { discMap[d.discipline_name.toLowerCase()] = d.discipline_id; });
-            const discIds = discNames.map(n => discMap[String(n).toLowerCase()]).filter(Boolean);
-            if (discIds.length > 0) {
-              await API.post(`/admin/students/${studentRes.data.student_id}/disciplines`, { discipline_ids: discIds });
-            }
-          }
-          success++;
-        } catch { failed++; }
-      }
-      showMsg(`✅ Imported ${success} students${failed?`, ❌ ${failed} failed`:''}`, failed?'warning':'success');
-      fetchStudents();
-    } catch { showMsg('Failed!','error'); } finally { setImporting(false); e.target.value=''; }
-  };
 
+      const students = rows.map(row => ({
+        roll_no: String(row.roll_no || ''),
+        first_name: String(row.name || row.first_name || ''),
+        last_name: String(row.last_name || ''),
+        email: String(row.email || ''),
+        phone: String(row.phone || ''),
+        semester: Number(row.semester || 1),
+        study_year: Number(row.year || row.study_year || 1),
+        password: row.password ? String(row.password) : undefined,
+        level_id: levelMap[String(row.level_name || '').toUpperCase()] || null,
+        programme_id: progMap[String(row.programme_name || '').toLowerCase()] || null,
+        faculty_id: facMap[String(row.faculty_name || '').toLowerCase()] || null,
+      }));
+
+      const res = await API.post('/students/bulk', { students });
+      const { success, failed, errors } = res.data;
+      if (errors?.length) console.warn('Import errors:', errors);
+      showMsg(`✅ Imported ${success} students${failed ? `, ❌ ${failed} failed` : ''}`, failed ? 'warning' : 'success');
+      fetchStudents();
+    } catch (err) { showMsg('Import failed: ' + (err.response?.data?.error || err.message), 'error'); }
+    finally { setImporting(false); e.target.value = ''; }
+  };
   const handleImportTeachers = async (e) => {
     const file = e.target.files[0]; if (!file) return; setImporting(true);
     try {
@@ -1276,7 +1283,7 @@ export default function AdminDashboard({ admin, onLogout }) {
 
   return (
     <div style={styles.container}>
-      <nav style={styles.nav}>
+      <nav style={styles.nav} className="erp-nav">
         <h2 style={styles.navTitle}>🎓 College ERP — Admin Panel</h2>
         <div style={styles.navRight}>
           <span style={styles.adminName}>👤 {admin.name}</span>
@@ -1284,7 +1291,7 @@ export default function AdminDashboard({ admin, onLogout }) {
         </div>
       </nav>
 
-      <div style={styles.tabs}>
+      <div style={styles.tabs} className="erp-tabs">
         {tabs.map(tab => (
           <button key={tab} style={{...styles.tab, ...(activeTab===tab ? styles.activeTab : {})}}
             onClick={() => { setActiveTab(tab); setMsg(''); setForm({}); setStudentLevel(''); setStudentFaculty(''); }}>
@@ -1295,7 +1302,7 @@ export default function AdminDashboard({ admin, onLogout }) {
 
       {msg && <div style={msgStyle}>{msg}</div>}
 
-      <div style={styles.content}>
+      <div style={styles.content} className="erp-content">
 
         {/* LEVELS FACULTIES PROGRAMMES */}
         {activeTab === 'levels' && (
@@ -1303,12 +1310,12 @@ export default function AdminDashboard({ admin, onLogout }) {
             {/* LEVELS */}
             <div style={styles.section}>
               <h3 style={styles.sectionTitle}>🎯 Levels</h3>
-              <form onSubmit={handleAddLevel} style={styles.form}>
+              <form onSubmit={handleAddLevel} style={styles.form} className="erp-form-grid erp-form-grid-3">
                 <input style={styles.input} placeholder="Level (e.g. UG)" value={form.level_name||''} onChange={e=>setForm({...form,level_name:e.target.value})} required />
                 <input style={styles.input} placeholder="Description" value={form.description||''} onChange={e=>setForm({...form,description:e.target.value})} />
                 <button style={styles.addBtn} type="submit">Add</button>
               </form>
-              <table style={styles.table}>
+              <table style={styles.table} className="erp-table">
                 <thead><tr>{['ID','Level','Desc','Del'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                 <tbody>{levels.map(l=>(
                   <tr key={l.level_id}>
@@ -1324,12 +1331,12 @@ export default function AdminDashboard({ admin, onLogout }) {
             {/* FACULTIES */}
             <div style={styles.section}>
               <h3 style={styles.sectionTitle}>🏛️ Faculties</h3>
-              <form onSubmit={handleAddFaculty} style={styles.form}>
+              <form onSubmit={handleAddFaculty} style={styles.form} className="erp-form-grid erp-form-grid-3">
                 <input style={styles.input} placeholder="Faculty (e.g. Arts)" value={form.faculty_name||''} onChange={e=>setForm({...form,faculty_name:e.target.value})} required />
                 <input style={styles.input} placeholder="Description" value={form.description||''} onChange={e=>setForm({...form,description:e.target.value})} />
                 <button style={styles.addBtn} type="submit">Add</button>
               </form>
-              <table style={styles.table}>
+              <table style={styles.table} className="erp-table">
                 <thead><tr>{['ID','Faculty','Desc','Del'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                 <tbody>{faculties.map(f=>(
                   <tr key={f.faculty_id}>
@@ -1345,7 +1352,7 @@ export default function AdminDashboard({ admin, onLogout }) {
             {/* PROGRAMMES */}
             <div style={styles.section}>
               <h3 style={styles.sectionTitle}>📚 Programmes</h3>
-              <form onSubmit={handleAddProgramme} style={styles.form}>
+              <form onSubmit={handleAddProgramme} style={styles.form} className="erp-form-grid erp-form-grid-4">
                 <select style={styles.input} value={form.level_id||''} onChange={e=>setForm({...form,level_id:e.target.value})} required>
                   <option value="">Select Level</option>
                   {levels.map(l=><option key={l.level_id} value={l.level_id}>{l.level_name}</option>)}
@@ -1358,7 +1365,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                 <input style={styles.input} type="number" placeholder="Duration (yrs)" value={form.duration_years||''} onChange={e=>setForm({...form,duration_years:e.target.value})} required />
                 <button style={styles.addBtn} type="submit">Add</button>
               </form>
-              <table style={styles.table}>
+              <table style={styles.table} className="erp-table">
                 <thead><tr>{['Level','Faculty','Programme','Dur','Del'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                 <tbody>{programmes.map(p=>(
                   <tr key={p.programme_id}>
@@ -1397,7 +1404,7 @@ export default function AdminDashboard({ admin, onLogout }) {
               <p style={styles.importHint}>📋 Required: <strong>roll_no, name, email, phone, level_name, faculty_name, programme_name, semester, year, password</strong></p>
             </div>
             <h3>Add Student Manually</h3>
-            <form onSubmit={handleAddStudent} style={styles.form}>
+            <form onSubmit={handleAddStudent} style={styles.form} className="erp-form-grid erp-form-grid-4">
               {['roll_no','name','email','phone'].map(f=>(
                 <input key={f} style={styles.input} placeholder={f.replace('_',' ')} value={form[f]||''} onChange={e=>setForm({...form,[f]:e.target.value})} required />
               ))}
@@ -1419,9 +1426,33 @@ export default function AdminDashboard({ admin, onLogout }) {
               <button style={styles.addBtn} type="submit">Add Student</button>
             </form>
             <h3>All Students ({students.length})</h3>
-            <table style={styles.table}>
+            <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'1rem',alignItems:'center'}}>
+              <input style={{...styles.input,flex:'1 1 180px',minWidth:'150px'}} placeholder="🔍 Search roll no or name..." value={stuSearch} onChange={e=>setStuSearch(e.target.value)} />
+              <select style={{...styles.input,flex:'0 1 150px'}} value={stuFilterFaculty} onChange={e=>{setStuFilterFaculty(e.target.value);setStuFilterProg('');}}>
+                <option value="">All Faculties</option>
+                {faculties.map(f=><option key={f.faculty_id} value={f.faculty_id}>{f.faculty_name}</option>)}
+              </select>
+              <select style={{...styles.input,flex:'0 1 180px'}} value={stuFilterProg} onChange={e=>setStuFilterProg(e.target.value)}>
+                <option value="">All Programmes</option>
+                {programmes.filter(p=>!stuFilterFaculty||String(p.faculty_id)===stuFilterFaculty).map(p=><option key={p.programme_id} value={p.programme_id}>{p.programme_name}</option>)}
+              </select>
+              <select style={{...styles.input,flex:'0 1 100px'}} value={stuFilterSem} onChange={e=>setStuFilterSem(e.target.value)}>
+                <option value="">All Sem</option>
+                {[1,2,3,4,5,6,7,8].map(s=><option key={s} value={s}>Sem {s}</option>)}
+              </select>
+              <button style={{...styles.delBtn,background:'#a0aec0',color:'#fff'}} onClick={()=>{setStuSearch('');setStuFilterFaculty('');setStuFilterProg('');setStuFilterSem('');}}>Clear</button>
+            </div>
+            {(() => {
+              let filtered = students;
+              if (stuSearch) { const q = stuSearch.toLowerCase(); filtered = filtered.filter(s => (s.roll_no||'').toLowerCase().includes(q) || (s.name||'').toLowerCase().includes(q)); }
+              if (stuFilterFaculty) filtered = filtered.filter(s => String(s.faculty_id) === stuFilterFaculty);
+              if (stuFilterProg) filtered = filtered.filter(s => String(s.programme_id) === stuFilterProg);
+              if (stuFilterSem) filtered = filtered.filter(s => String(s.semester) === stuFilterSem);
+              return (<>
+              <p style={{margin:'0 0 0.5rem',color:'#718096',fontSize:'0.85rem'}}>Showing {filtered.length} of {students.length} students</p>
+            <table style={styles.table} className="erp-table">
               <thead><tr>{['ID','Roll No','Name','Level','Faculty','Programme','Sem','Action'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
-              <tbody>{students.map(s=>(
+              <tbody>{filtered.map(s=>(
                 <tr key={s.student_id}>
                   <td style={styles.td}>{s.student_id}</td>
                   <td style={styles.td}>{s.roll_no}</td>
@@ -1434,6 +1465,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                 </tr>
               ))}</tbody>
             </table>
+            </>); })()}
           </div>
         )}
 
@@ -1452,7 +1484,7 @@ export default function AdminDashboard({ admin, onLogout }) {
               <p style={styles.importHint}>📋 Required: <strong>first_name, email, password</strong> &nbsp;|&nbsp; Optional: title, last_name, phone, designation, employee_code, discipline_1, discipline_2, discipline_3, department_1, department_2</p>
             </div>
             <h3>Add Teacher Manually</h3>
-            <form onSubmit={handleAddTeacher} style={styles.form}>
+            <form onSubmit={handleAddTeacher} style={styles.form} className="erp-form-grid erp-form-grid-4">
               <select style={styles.input} value={form.title||''} onChange={e=>setForm({...form,title:e.target.value})} required>
                 <option value="">Select Title</option>
                 {['Dr','Mr','Mrs','Ms','Prof'].map(t=><option key={t} value={t}>{t}</option>)}
@@ -1527,7 +1559,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                 <button style={{...styles.delBtn, padding:'0.6rem 1rem'}} type="button" onClick={()=>setEditingTeacher(null)}>Cancel</button>
               </form>
             )}
-            <table style={styles.table}>
+            <table style={styles.table} className="erp-table">
               <thead><tr>{['ID','Name','Email','Phone','Department','Discipline','Action'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
               <tbody>{teachers.map(t=>(
                 <tr key={t.teacher_id} style={editingTeacher?.teacher_id===t.teacher_id?{background:'#fffbeb'}:{}}>
@@ -1749,17 +1781,45 @@ export default function AdminDashboard({ admin, onLogout }) {
                     <h3 style={{margin:0}}>📋 Enrollment Management
                       <span style={{fontSize:'0.85rem',color:'#718096',fontWeight:'400',marginLeft:'0.75rem'}}>({enrollmentSummary.length} students)</span>
                     </h3>
-                    <div style={{display:'flex',gap:'0.5rem',flexWrap:'wrap',alignItems:'center'}}>
-                      <input style={{...styles.input,minWidth:'200px',margin:0}} placeholder="🔍 Search by name or roll no…"
-                        value={enrollSearch} onChange={e=>setEnrollSearch(e.target.value)} />
-                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportEnrollmentSummary}>📊 Summary</button>
-                      <button style={{...styles.templateBtn,whiteSpace:'nowrap',background:'#276749',color:'#fff'}} onClick={handleExportEnrollment}>📥 Programme-wise</button>
-                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportSemesterWise}>📅 Semester-wise</button>
-                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportOddSemesters}>📋 Odd Sem (1,3,5,7)</button>
-                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportEvenSemesters}>📋 Even Sem (2,4,6,8)</button>
-                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportEnrollmentDetail}>📄 Full Detail</button>
-                      <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportSubjectWise}>📚 Subject-wise</button>
-                    </div>
+                    <label style={{...styles.templateBtn,whiteSpace:'nowrap',background:'#2b6cb0',color:'#fff',cursor:'pointer',margin:0}}>📤 Import Enrollment <input type="file" accept=".xlsx,.xls" hidden onChange={handleImportEnrollment}/></label>
+                  </div>
+                  {/* Filters */}
+                  <div style={{display:'flex',gap:'8px',flexWrap:'wrap',marginBottom:'1rem',alignItems:'center'}}>
+                    <input style={{...styles.input,flex:'1 1 180px',minWidth:'150px',margin:0}} placeholder="🔍 Search roll no or name…"
+                      value={enrollSearch} onChange={e=>setEnrollSearch(e.target.value)} />
+                    <select style={{...styles.input,flex:'0 1 140px',margin:0}} value={enrollFilterFaculty} onChange={e=>{setEnrollFilterFaculty(e.target.value);setEnrollFilterProg('');}}>
+                      <option value="">All Faculties</option>
+                      {faculties.map(f=><option key={f.faculty_id} value={f.faculty_id}>{f.faculty_name}</option>)}
+                    </select>
+                    <select style={{...styles.input,flex:'0 1 120px',margin:0}} value={enrollFilterLevel} onChange={e=>{setEnrollFilterLevel(e.target.value);setEnrollFilterProg('');}}>
+                      <option value="">All Levels</option>
+                      {levels.map(l=><option key={l.level_id} value={l.level_id}>{l.level_name}</option>)}
+                    </select>
+                    <select style={{...styles.input,flex:'0 1 180px',margin:0}} value={enrollFilterProg} onChange={e=>setEnrollFilterProg(e.target.value)}>
+                      <option value="">All Programmes</option>
+                      {programmes.filter(p=>(!enrollFilterFaculty||String(p.faculty_id)===enrollFilterFaculty)&&(!enrollFilterLevel||String(p.level_id)===enrollFilterLevel)).map(p=><option key={p.programme_id} value={p.programme_id}>{p.programme_name}</option>)}
+                    </select>
+                    <select style={{...styles.input,flex:'0 1 100px',margin:0}} value={enrollFilterSem} onChange={e=>setEnrollFilterSem(e.target.value)}>
+                      <option value="">All Sem</option>
+                      {[1,2,3,4,5,6,7,8].map(s=><option key={s} value={s}>Sem {s}</option>)}
+                    </select>
+                    <select style={{...styles.input,flex:'0 1 140px',margin:0}} value={enrollFilterStatus} onChange={e=>setEnrollFilterStatus(e.target.value)}>
+                      <option value="">All Status</option>
+                      <option value="submitted">Submitted</option>
+                      <option value="draft">Draft</option>
+                      <option value="not_enrolled">Not Enrolled</option>
+                    </select>
+                    <button style={{...styles.delBtn,background:'#a0aec0',color:'#fff'}} onClick={()=>{setEnrollSearch('');setEnrollFilterFaculty('');setEnrollFilterLevel('');setEnrollFilterProg('');setEnrollFilterSem('');setEnrollFilterStatus('');}}>Clear</button>
+                  </div>
+                  {/* Export Buttons */}
+                  <div style={{display:'flex',gap:'0.5rem',flexWrap:'wrap',marginBottom:'1rem'}}>
+                    <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportEnrollmentSummary}>📊 Summary</button>
+                    <button style={{...styles.templateBtn,whiteSpace:'nowrap',background:'#276749',color:'#fff'}} onClick={handleExportEnrollment}>📥 Programme-wise</button>
+                    <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportSemesterWise}>📅 Semester-wise</button>
+                    <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportOddSemesters}>📋 Odd Sem</button>
+                    <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={handleExportEvenSemesters}>📋 Even Sem</button>
+                    <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportEnrollmentDetail}>📄 Full Detail</button>
+                    <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={exportSubjectWise}>📚 Subject-wise</button>
                   </div>
                   {/* Stats bar */}
                   <div style={{display:'flex',gap:'1rem',flexWrap:'wrap'}}>
@@ -1781,7 +1841,17 @@ export default function AdminDashboard({ admin, onLogout }) {
                   <table style={{...styles.table,boxShadow:'none'}}>
                     <thead><tr>{['Roll No','Name','Programme','Level','Sem','Status','Accepted','Pending','Admin Modified','Actions'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                     <tbody>{enrollmentSummary
-                      .filter(s => !enrollSearch || s.student_name?.toLowerCase().includes(enrollSearch.toLowerCase()) || s.roll_no?.toLowerCase().includes(enrollSearch.toLowerCase()))
+                      .filter(s => {
+                        if (enrollSearch) { const q = enrollSearch.toLowerCase(); if (!(s.student_name||'').toLowerCase().includes(q) && !(s.roll_no||'').toLowerCase().includes(q)) return false; }
+                        if (enrollFilterFaculty && String(s.faculty_id) !== enrollFilterFaculty) return false;
+                        if (enrollFilterLevel && String(s.level_id) !== enrollFilterLevel) return false;
+                        if (enrollFilterProg && String(s.programme_id) !== enrollFilterProg) return false;
+                        if (enrollFilterSem && String(s.semester) !== enrollFilterSem) return false;
+                        if (enrollFilterStatus === 'submitted' && !(s.accepted > 0)) return false;
+                        if (enrollFilterStatus === 'draft' && !(s.total_enrolled > 0 && s.accepted === 0)) return false;
+                        if (enrollFilterStatus === 'not_enrolled' && s.total_enrolled) return false;
+                        return true;
+                      })
                       .map(s => {
                         const isSubmitted = s.accepted > 0;
                         const notEnrolled = !s.total_enrolled;
@@ -1989,7 +2059,7 @@ export default function AdminDashboard({ admin, onLogout }) {
               </div>
             </div>
             <h3>All Attendance Records ({attendance.length})</h3>
-            <table style={styles.table}>
+            <table style={styles.table} className="erp-table">
               <thead><tr>{['ID','Student','Subject','Date','Status'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
               <tbody>{attendance.map(a=>(
                 <tr key={a.attendance_id}>
@@ -2180,7 +2250,7 @@ export default function AdminDashboard({ admin, onLogout }) {
               </div>
             </div>
             <h3>All Marks Records ({marks.length})</h3>
-            <table style={styles.table}>
+            <table style={styles.table} className="erp-table">
               <thead><tr>{['ID','Student','Subject','Exam Type','Marks','Max','Percentage','Semester'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
               <tbody>{marks.map(m=>(
                 <tr key={m.mark_id}>
