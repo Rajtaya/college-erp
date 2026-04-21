@@ -66,6 +66,28 @@ router.get('/teacher/:teacher_id', async (req, res) => {
   } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });
 
+// GET /all-teachers — all subject-teacher assignments in one query
+router.get('/all-teachers', async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT st.subject_id, t.teacher_id, CONCAT(t.first_name, ' ', t.last_name) AS name, t.email,
+              st.id as assignment_id, st.section, st.programme_id, st.class_name,
+              p.programme_name
+       FROM subject_teachers st
+       JOIN teachers t ON st.teacher_id = t.teacher_id
+       LEFT JOIN programmes p ON st.programme_id = p.programme_id
+       ORDER BY st.subject_id, t.first_name, st.section`
+    );
+    // Group by subject_id
+    const grouped = {};
+    rows.forEach(r => {
+      if (!grouped[r.subject_id]) grouped[r.subject_id] = [];
+      grouped[r.subject_id].push(r);
+    });
+    res.json(grouped);
+  } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
+});
+
 // GET /:subject_id/teachers — all teachers for a subject with their sections
 router.get('/:subject_id/teachers', async (req, res) => {
   try {

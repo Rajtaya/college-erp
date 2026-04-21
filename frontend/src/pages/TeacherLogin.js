@@ -24,8 +24,8 @@ export default function TeacherLogin({ onLogin }) {
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
+    <div style={styles.container} className="erp-login-container">
+      <div style={styles.card} className="erp-login-form">
         <h1 style={styles.title}>🎓 College ERP</h1>
         <h2 style={styles.subtitle}>Teacher Login</h2>
         {error && <p style={styles.error}>{error}</p>}

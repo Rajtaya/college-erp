@@ -7,6 +7,7 @@ const crypto    = require('crypto');
 const { verify }     = require('../middleware/auth');
 const blacklist      = require('../middleware/tokenBlacklist');
 const { auditLog }   = require('../middleware/audit');
+const { safeDelete, mapDeleteError } = require('../utils/safeDelete');
 require('dotenv').config();
 
 router.post('/login', async (req, res) => {
@@ -46,7 +47,7 @@ router.use(verify('admin'));
 router.get('/students', async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT s.student_id, s.roll_no, CONCAT(s.first_name, ' ', s.last_name) AS name,
+      `SELECT s.student_id, s.roll_no, TRIM(CONCAT(IFNULL(s.first_name,''), ' ', IFNULL(s.last_name,''))) AS name,
               s.first_name, s.last_name, s.email, s.phone, s.semester, s.study_year,
               s.level_id, s.faculty_id, s.programme_id, s.enrollment_submitted,
               l.level_name, p.programme_name, f.faculty_name
@@ -60,20 +61,37 @@ router.get('/students', async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
+//   const { safeDelete, mapDeleteError } = require('../utils/safeDelete');
+
 router.delete('/students/:id', async (req, res) => {
   const id = req.params.id;
   try {
-    const [check] = await db.query('SELECT student_id, roll_no FROM students WHERE student_id = ?', [id]);
+    const [check] = await db.query(
+      'SELECT student_id, roll_no FROM students WHERE student_id = ?', [id]
+    );
     if (!check.length) return res.status(404).json({ error: 'Student not found' });
-    await db.query('DELETE FROM student_disciplines WHERE student_id = ?', [id]);
-    await db.query('DELETE FROM student_subject_enrollment WHERE student_id = ?', [id]);
-    await db.query('DELETE FROM attendance WHERE student_id = ?', [id]);
-    await db.query('DELETE FROM marks WHERE student_id = ?', [id]);
-    await db.query('DELETE FROM fees WHERE student_id = ?', [id]);
-    await db.query('DELETE FROM students WHERE student_id = ?', [id]);
+
+    await safeDelete(db, {
+      parent: { table: 'students', column: 'student_id', id },
+      children: [
+        // Grandchildren first (fee_payments -> fees -> students)
+        { table: 'fee_payments', via: { joinTable: 'fees', joinColumn: 'student_id', fkColumn: 'fee_id' } },
+        // Direct children
+        { table: 'attendance',                 column: 'student_id' },
+        { table: 'fees',                       column: 'student_id' },
+        { table: 'marks',                      column: 'student_id' },
+        { table: 'student_subject_enrollment', column: 'student_id' },
+        { table: 'student_disciplines',        column: 'student_id' },
+      ],
+    });
+
     auditLog(req, 'DELETE_STUDENT', 'students', id, { roll_no: check[0].roll_no });
     res.json({ message: 'Student deleted' });
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+  } catch (err) {
+    console.error('DELETE /students/:id error:', err);
+    const mapped = mapDeleteError(err, 'student');
+    res.status(mapped.status).json(mapped.body);
+  }
 });
 
 // Assign disciplines to a student
@@ -236,16 +254,35 @@ router.get('/teachers/:id/subjects', async (req, res) => {
 router.delete('/teachers/:id', async (req, res) => {
   const id = req.params.id;
   try {
-    const [check] = await db.query('SELECT teacher_id, email FROM teachers WHERE teacher_id = ?', [id]);
+    const [check] = await db.query(
+      'SELECT teacher_id, email FROM teachers WHERE teacher_id = ?', [id]
+    );
     if (!check.length) return res.status(404).json({ error: 'Teacher not found' });
-    await db.query('UPDATE attendance SET teacher_id = NULL WHERE teacher_id = ?', [id]);
-    await db.query('DELETE FROM teacher_disciplines WHERE teacher_id = ?', [id]);
-    await db.query('DELETE FROM teacher_departments WHERE teacher_id = ?', [id]);
-    await db.query('DELETE FROM subject_teachers WHERE teacher_id = ?', [id]);
-    await db.query('DELETE FROM teachers WHERE teacher_id = ?', [id]);
+
+    // attendance.teacher_id is nullable — set to NULL to preserve history
+    const conn = await db.getConnection();
+    try {
+      await conn.beginTransaction();
+      await conn.query('UPDATE attendance SET teacher_id = NULL WHERE teacher_id = ?', [id]);
+      await conn.query('DELETE FROM teacher_disciplines WHERE teacher_id = ?', [id]);
+      await conn.query('DELETE FROM teacher_departments WHERE teacher_id = ?', [id]);
+      await conn.query('DELETE FROM subject_teachers   WHERE teacher_id = ?', [id]);
+      await conn.query('DELETE FROM teachers           WHERE teacher_id = ?', [id]);
+      await conn.commit();
+    } catch (e) {
+      await conn.rollback();
+      throw e;
+    } finally {
+      conn.release();
+    }
+
     auditLog(req, 'DELETE_TEACHER', 'teachers', id, { email: check[0].email });
     res.json({ message: 'Teacher deleted' });
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+  } catch (err) {
+    console.error('DELETE /teachers/:id error:', err);
+    const mapped = mapDeleteError(err, 'teacher');
+    res.status(mapped.status).json(mapped.body);
+  }
 });
 
 // ── SUBJECTS ──────────────────────────────────────────────────────────────────
@@ -287,18 +324,21 @@ router.delete('/subjects/:id', async (req, res) => {
   try {
     await conn.beginTransaction();
     await conn.query('DELETE FROM student_subject_enrollment WHERE subject_id = ?', [id]);
-    await conn.query('DELETE FROM attendance WHERE subject_id = ?', [id]);
-    await conn.query('DELETE FROM marks WHERE subject_id = ?', [id]);
-    await conn.query('DELETE FROM notifications WHERE subject_id = ?', [id]);
-    await conn.query('DELETE FROM programme_subject_pool WHERE subject_id = ?', [id]);
+    await conn.query('DELETE FROM attendance                 WHERE subject_id = ?', [id]);
+    await conn.query('DELETE FROM marks                      WHERE subject_id = ?', [id]);
+    await conn.query('DELETE FROM notifications              WHERE subject_id = ?', [id]);
+    await conn.query('DELETE FROM programme_subject_pool     WHERE subject_id = ?', [id]);
     // subject_teachers has ON DELETE CASCADE
-    await conn.query('DELETE FROM subjects WHERE subject_id = ?', [id]);
+    const [result] = await conn.query('DELETE FROM subjects WHERE subject_id = ?', [id]);
     await conn.commit();
+
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Subject not found' });
     res.json({ message: 'Subject deleted' });
   } catch (err) {
     await conn.rollback();
-    console.error(err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('DELETE /subjects/:id error:', err);
+    const mapped = mapDeleteError(err, 'subject');
+    res.status(mapped.status).json(mapped.body);
   } finally {
     conn.release();
   }
@@ -312,7 +352,7 @@ router.get('/attendance', async (req, res) => {
     const offset = (Math.max(parseInt(req.query.page) || 1, 1) - 1) * limit;
     const [rows] = await db.query(
       `SELECT a.attendance_id, a.student_id, a.subject_id, a.date, a.status, a.teacher_id,
-              CONCAT(s.first_name, ' ', s.last_name) AS student_name,
+              TRIM(CONCAT(IFNULL(s.first_name,''), ' ', IFNULL(s.last_name,''))) AS student_name,
               s.roll_no, sub.subject_name, sub.subject_code
        FROM attendance a
        JOIN students s  ON a.student_id = s.student_id
@@ -328,7 +368,7 @@ router.get('/attendance', async (req, res) => {
 router.get('/attendance/export', async (req, res) => {
   try {
     const [rows] = await db.query(`
-      SELECT st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name,
+      SELECT st.roll_no, TRIM(CONCAT(IFNULL(st.first_name,''), ' ', IFNULL(st.last_name,''))) AS student_name,
              p.programme_name, l.level_name, st.semester,
              sub.subject_code, sub.subject_name, sub.category,
              a.date, a.status as attendance_status
@@ -346,7 +386,7 @@ router.get('/attendance/export', async (req, res) => {
 router.get('/attendance/summary', async (req, res) => {
   try {
     const [rows] = await db.query(`
-      SELECT st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name,
+      SELECT st.roll_no, TRIM(CONCAT(IFNULL(st.first_name,''), ' ', IFNULL(st.last_name,''))) AS student_name,
              p.programme_name, l.level_name, st.semester,
              sub.subject_code, sub.subject_name, sub.category,
              COUNT(a.attendance_id) as total_classes,
@@ -371,7 +411,7 @@ router.get('/attendance/summary', async (req, res) => {
 router.get('/fees/export', async (req, res) => {
   try {
     const [rows] = await db.query(`
-      SELECT f.fee_id, st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name,
+      SELECT f.fee_id, st.roll_no, TRIM(CONCAT(IFNULL(st.first_name,''), ' ', IFNULL(st.last_name,''))) AS student_name,
              p.programme_name, l.level_name, st.semester,
              f.fee_type, f.amount, f.due_date, f.paid_date, f.status, f.transaction_ref
       FROM fees f
@@ -391,7 +431,7 @@ router.get('/fees', async (req, res) => {
     const [rows] = await db.query(
       `SELECT f.fee_id, f.student_id, f.amount, f.fee_type, f.due_date,
               f.paid_date, f.status, f.transaction_ref,
-              CONCAT(s.first_name, ' ', s.last_name) AS student_name,
+              TRIM(CONCAT(IFNULL(s.first_name,''), ' ', IFNULL(s.last_name,''))) AS student_name,
               s.roll_no, p.programme_name, l.level_name, s.semester
        FROM fees f
        JOIN students s ON f.student_id = s.student_id
@@ -476,7 +516,7 @@ router.get('/marks', async (req, res) => {
     const [rows] = await db.query(
       `SELECT m.mark_id, m.student_id, m.subject_id, m.exam_type,
               m.marks_obtained, m.max_marks, m.semester, m.is_visible_to_student,
-              CONCAT(s.first_name, ' ', s.last_name) AS student_name,
+              TRIM(CONCAT(IFNULL(s.first_name,''), ' ', IFNULL(s.last_name,''))) AS student_name,
               s.roll_no, sub.subject_name, sub.subject_code
        FROM marks m
        JOIN students s  ON m.student_id = s.student_id
@@ -492,7 +532,7 @@ router.get('/marks', async (req, res) => {
 router.get('/marks/export', async (req, res) => {
   try {
     const [rows] = await db.query(`
-      SELECT st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name,
+      SELECT st.roll_no, TRIM(CONCAT(IFNULL(st.first_name,''), ' ', IFNULL(st.last_name,''))) AS student_name,
              p.programme_name, l.level_name, st.semester,
              sub.subject_code, sub.subject_name, sub.category, sub.credits,
              m.exam_type, m.marks_obtained, m.max_marks,
@@ -521,7 +561,7 @@ router.delete('/marks/:id', async (req, res) => {
 router.get('/enrollment/summary', async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT st.student_id, st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name,
+      `SELECT st.student_id, st.roll_no, TRIM(CONCAT(IFNULL(st.first_name,''), ' ', IFNULL(st.last_name,''))) AS student_name,
               st.programme_id, st.level_id, st.faculty_id,
               p.programme_name, l.level_name, st.semester,
               COUNT(e.enrollment_id) as total_enrolled,
@@ -618,7 +658,7 @@ router.get('/enrollment/detail/:student_id', async (req, res) => {
 router.get('/enrollment/export', async (req, res) => {
   try {
     const [rows] = await db.query(`
-      SELECT st.roll_no, CONCAT(st.first_name, ' ', st.last_name) AS student_name,
+      SELECT st.roll_no, TRIM(CONCAT(IFNULL(st.first_name,''), ' ', IFNULL(st.last_name,''))) AS student_name,
              p.programme_id, p.programme_name,
              p.faculty_id, f.faculty_name,
              p.level_id, l.level_name,
@@ -648,7 +688,7 @@ router.get('/enrollment/export-subject-wise', async (req, res) => {
     const [rows] = await db.query(`
       SELECT sub.subject_code, sub.subject_name, sub.category, sub.semester, sub.credits,
              p.programme_name, st.roll_no,
-             CONCAT(st.first_name, ' ', st.last_name) AS student_name, e.status
+             TRIM(CONCAT(IFNULL(st.first_name,''), ' ', IFNULL(st.last_name,''))) AS student_name, e.status
       FROM student_subject_enrollment e
       JOIN subjects sub ON e.subject_id = sub.subject_id
       JOIN students st ON e.student_id = st.student_id
@@ -676,49 +716,89 @@ router.post('/enrollment/import', async (req, res) => {
     validated.push({ roll_no, subject_code, status });
   }
 
-  // ── Pass 2: bulk-resolve roll_no → student_id, subject_code → subject_id ──
+  // ── Pass 2: bulk-resolve roll_no → student (with semester), subject_code → subject (with category) ──
   const rollNos      = [...new Set(validated.map(r => r.roll_no))];
   const subjectCodes = [...new Set(validated.map(r => r.subject_code))];
 
   const [stuRows] = await db.query(
-    `SELECT student_id, roll_no FROM students WHERE roll_no IN (?)`, [rollNos]
+    `SELECT student_id, roll_no, semester, academic_year_id FROM students WHERE roll_no IN (?)`, [rollNos]
   );
   const [subRows] = await db.query(
-    `SELECT subject_id, subject_code FROM subjects WHERE subject_code IN (?)`, [subjectCodes]
+    `SELECT subject_id, subject_code, category FROM subjects WHERE subject_code IN (?)`, [subjectCodes]
   );
-  const stuMap = Object.fromEntries(stuRows.map(s => [s.roll_no, s.student_id]));
-  const subMap = Object.fromEntries(subRows.map(s => [s.subject_code.trim(), s.subject_id]));
+  const stuMap = Object.fromEntries(stuRows.map(s => [s.roll_no, s]));
+  const subMap = Object.fromEntries(subRows.map(s => [s.subject_code.trim(), s]));
+
+  // Fall back to current academic year if student.academic_year_id is NULL
+  const [ayRows] = await db.query('SELECT academic_year_id FROM academic_years WHERE is_current = 1 LIMIT 1');
+  const currentAyId = ayRows.length ? ayRows[0].academic_year_id : null;
 
   // ── Pass 3: execute all valid rows inside a single transaction ─────────────
   let success = 0, failed = 0;
+  const majorTouchedByStudent = new Map(); // student_id → Set of semesters where a MAJOR was touched
+
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
     for (const { roll_no, subject_code, status } of validated) {
-      const student_id = stuMap[roll_no];
-      const subject_id = subMap[subject_code];
-      if (!student_id) { failed++; errors.push(`Student not found: ${roll_no}`); continue; }
-      if (!subject_id) { failed++; errors.push(`Subject not found: ${subject_code}`); continue; }
+      const student = stuMap[roll_no];
+      const subject = subMap[subject_code];
+      if (!student) { failed++; errors.push(`Student not found: ${roll_no}`); continue; }
+      if (!subject) { failed++; errors.push(`Subject not found: ${subject_code}`); continue; }
+
+      const is_major = subject.category === 'MAJOR' ? 1 : 0;
+      const ay_id    = student.academic_year_id || currentAyId;
+
       const [existing] = await conn.query(
         'SELECT enrollment_id FROM student_subject_enrollment WHERE student_id = ? AND subject_id = ?',
-        [student_id, subject_id]
+        [student.student_id, subject.subject_id]
       );
       if (existing.length) {
         await conn.query(
-          'UPDATE student_subject_enrollment SET status=?, admin_modified=1, is_draft=0 WHERE student_id=? AND subject_id=?',
-          [status, student_id, subject_id]
+          `UPDATE student_subject_enrollment
+           SET status=?, admin_modified=1, is_draft=0, is_major=?,
+               semester=COALESCE(semester, ?), academic_year_id=COALESCE(academic_year_id, ?)
+           WHERE student_id=? AND subject_id=?`,
+          [status, is_major, student.semester, ay_id, student.student_id, subject.subject_id]
         );
       } else {
         await conn.query(
-          'INSERT INTO student_subject_enrollment (student_id, subject_id, status, admin_modified, is_draft) VALUES (?,?,?,1,0)',
-          [student_id, subject_id, status]
+          `INSERT INTO student_subject_enrollment
+             (student_id, subject_id, status, admin_modified, is_draft, is_major, semester, academic_year_id)
+           VALUES (?,?,?,1,0,?,?,?)`,
+          [student.student_id, subject.subject_id, status, is_major, student.semester, ay_id]
         );
       }
+
+      if (is_major === 1 && student.semester != null) {
+        if (!majorTouchedByStudent.has(student.student_id)) {
+          majorTouchedByStudent.set(student.student_id, new Set());
+        }
+        majorTouchedByStudent.get(student.student_id).add(student.semester);
+      }
+
       success++;
     }
+
+    // ── Cascade: wipe MIC/MDC non-admin drafts for any student whose MAJOR was touched ──
+    for (const [student_id, semesters] of majorTouchedByStudent.entries()) {
+      for (const sem of semesters) {
+        await conn.query(
+          `DELETE e FROM student_subject_enrollment e
+           JOIN subjects s ON e.subject_id = s.subject_id
+           WHERE e.student_id = ?
+             AND e.admin_modified = 0
+             AND s.category IN ('MIC', 'MDC')
+             AND s.semester = ?`,
+          [student_id, sem]
+        );
+      }
+    }
+
     await conn.commit();
   } catch (e) {
     await conn.rollback();
+    console.error('ENROLLMENT_IMPORT ERROR:', e);
     return res.status(500).json({ error: 'Internal server error' });
   } finally {
     conn.release();
@@ -730,31 +810,77 @@ router.post('/enrollment/import', async (req, res) => {
 
 router.put('/enrollment/bulkupdate/:student_id', async (req, res) => {
   const { changes, admin_note } = req.body;
+  const student_id = req.params.student_id;
+
+  // Resolve student + subject categories up front
+  const [stuRows] = await db.query(
+    'SELECT student_id, semester, academic_year_id FROM students WHERE student_id = ?',
+    [student_id]
+  );
+  if (!stuRows.length) return res.status(404).json({ error: 'Student not found' });
+  const student = stuRows[0];
+
+  const [ayRows] = await db.query('SELECT academic_year_id FROM academic_years WHERE is_current = 1 LIMIT 1');
+  const currentAyId = ayRows.length ? ayRows[0].academic_year_id : null;
+  const ay_id = student.academic_year_id || currentAyId;
+
+  const subjectIds = [...new Set(changes.map(c => c.subject_id))];
+  const [subRows] = subjectIds.length
+    ? await db.query('SELECT subject_id, category FROM subjects WHERE subject_id IN (?)', [subjectIds])
+    : [[]];
+  const catMap = Object.fromEntries(subRows.map(s => [s.subject_id, s.category]));
+
+  let majorTouched = false;
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
     for (const change of changes) {
+      const category = catMap[change.subject_id];
+      if (!category) continue; // unknown subject, skip silently
+      const is_major = category === 'MAJOR' ? 1 : 0;
+
       const [existing] = await conn.query(
         'SELECT enrollment_id FROM student_subject_enrollment WHERE student_id = ? AND subject_id = ?',
-        [req.params.student_id, change.subject_id]
+        [student_id, change.subject_id]
       );
       if (existing.length) {
         await conn.query(
-          'UPDATE student_subject_enrollment SET status = ?, admin_modified = 1, is_draft = 0, admin_note = ? WHERE student_id = ? AND subject_id = ?',
-          [change.status, admin_note || '', req.params.student_id, change.subject_id]
+          `UPDATE student_subject_enrollment
+           SET status = ?, admin_modified = 1, is_draft = 0, admin_note = ?, is_major = ?,
+               semester = COALESCE(semester, ?), academic_year_id = COALESCE(academic_year_id, ?)
+           WHERE student_id = ? AND subject_id = ?`,
+          [change.status, admin_note || '', is_major, student.semester, ay_id, student_id, change.subject_id]
         );
       } else {
         await conn.query(
-          'INSERT INTO student_subject_enrollment (student_id, subject_id, status, admin_modified, admin_note, is_draft) VALUES (?, ?, ?, 1, ?, 0)',
-          [req.params.student_id, change.subject_id, change.status, admin_note || 'Added by admin']
+          `INSERT INTO student_subject_enrollment
+             (student_id, subject_id, status, admin_modified, admin_note, is_draft, is_major, semester, academic_year_id)
+           VALUES (?, ?, ?, 1, ?, 0, ?, ?, ?)`,
+          [student_id, change.subject_id, change.status, admin_note || 'Added by admin', is_major, student.semester, ay_id]
         );
       }
+
+      if (is_major === 1) majorTouched = true;
     }
+
+    // Cascade: wipe MIC/MDC non-admin drafts if any MAJOR was touched
+    if (majorTouched && student.semester != null) {
+      await conn.query(
+        `DELETE e FROM student_subject_enrollment e
+         JOIN subjects s ON e.subject_id = s.subject_id
+         WHERE e.student_id = ?
+           AND e.admin_modified = 0
+           AND s.category IN ('MIC', 'MDC')
+           AND s.semester = ?`,
+        [student_id, student.semester]
+      );
+    }
+
     await conn.commit();
-    res.json({ message: `${changes.length} subject(s) updated successfully` });
+    res.json({ message: `${changes.length} subject(s) updated successfully`, major_touched: majorTouched });
   } catch (err) {
     await conn.rollback();
-    console.error(err);
+    console.error('BULKUPDATE ERROR:', err);
     res.status(500).json({ error: 'Internal server error' });
   } finally {
     conn.release();

@@ -130,110 +130,29 @@ router.post('/bulk', verify('admin'), async (req, res) => {
 });
 // ── POST / — Add a student (admin only) ────────────────────────────────────
 
-// =============================================================================
-// PATCH: backend/routes/students.js
-// Replaces the existing `router.post('/', verify('admin'), async (req, res) => {...}` 
-// handler (around line 133) with a transactional version that:
-//   1. Creates the student
-//   2. Assigns disciplines (if provided) — atomic with the student insert
-//   3. Auto-assigns MAJOR subjects based on programme + semester + level + disciplines
-//   4. Returns counts so the UI can confirm the auto-assignment happened
-//
-// This closes the bug we found today where Taya (and 537 others) had no MAJOR
-// rows because the admin UI only inserted the student row, never the MAJORs.
-// =============================================================================
-
 router.post('/', verify('admin'), async (req, res) => {
   const {
     roll_no, first_name, last_name, email, phone,
     semester, study_year, password,
-    level_id, programme_id, faculty_id, academic_year_id, abc_id,
-    discipline_ids  // NEW: optional array of discipline IDs
+    level_id, programme_id, faculty_id, academic_year_id, abc_id
   } = req.body;
-
-  // Basic validation
-  if (!roll_no || !first_name || !password || !programme_id || !level_id || !semester) {
-    return res.status(400).json({
-      error: 'Missing required fields: roll_no, first_name, password, programme_id, level_id, semester'
-    });
-  }
-
-  const discIds = Array.isArray(discipline_ids)
-    ? [...new Set(discipline_ids.map(Number).filter(n => Number.isInteger(n) && n > 0))]
-    : [];
-
-  const conn = await db.getConnection();
   try {
-    await conn.beginTransaction();
-
-    // 1. Insert student
     const hashed   = await bcrypt.hash(password, 12);
     const emailVal = email && email.trim() ? email.trim() : null;
-    const [result] = await conn.query(
+    const [result] = await db.query(
       `INSERT INTO students
          (roll_no, first_name, last_name, email, phone,
           semester, study_year, password,
           level_id, programme_id, faculty_id, academic_year_id, abc_id)
        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [roll_no, first_name || null, last_name || null, emailVal, phone || null,
+      [roll_no, first_name, last_name, emailVal, phone || null,
        semester, study_year || 1, hashed,
-       level_id, programme_id, faculty_id || null,
+       level_id || null, programme_id || null, faculty_id || null,
        academic_year_id || null, abc_id || null]
     );
-    const newStudentId = result.insertId;
-
-    // 2. Assign disciplines (if any)
-    let disciplinesAssigned = 0;
-    if (discIds.length > 0) {
-      const placeholders = discIds.map(() => '(?,?)').join(',');
-      const values = discIds.flatMap(did => [newStudentId, did]);
-      const [dResult] = await conn.query(
-        `INSERT IGNORE INTO student_disciplines (student_id, discipline_id) VALUES ${placeholders}`,
-        values
-      );
-      disciplinesAssigned = dResult.affectedRows;
-    }
-
-    // 3. Auto-assign MAJOR subjects for this semester
-    //    Matches: subjects in student's disciplines, MAJOR category, correct semester + level
-    //    Uses ON DUPLICATE KEY UPDATE so re-running this is idempotent.
-    let majorsAssigned = 0;
-    if (discIds.length > 0) {
-      const [mResult] = await conn.query(
-        `INSERT INTO student_subject_enrollment
-           (student_id, subject_id, status, is_major, is_draft, admin_modified, semester, academic_year_id)
-         SELECT ?, s.subject_id, 'ACCEPTED', 1, 0, 1, ?, ?
-         FROM subjects s
-         WHERE s.category = 'MAJOR'
-           AND s.semester = ?
-           AND s.level_id = ?
-           AND s.discipline_id IN (?)`,
-        [newStudentId, semester, academic_year_id || null,
-         semester, level_id, discIds]
-      );
-      majorsAssigned = mResult.affectedRows;
-    }
-
-    await conn.commit();
-
-    res.json({
-      message: 'Student added',
-      student_id: newStudentId,
-      disciplines_assigned: disciplinesAssigned,
-      majors_assigned: majorsAssigned
-    });
-  } catch (err) {
-    await conn.rollback();
-    console.error('POST /students error:', err);
-    if (err.code === 'ER_DUP_ENTRY') {
-      return res.status(409).json({ error: 'Roll number, email, or ABC ID already exists' });
-    }
-    res.status(500).json({ error: 'Internal server error' });
-  } finally {
-    conn.release();
-  }
+    res.json({ message: 'Student added', student_id: result.insertId });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
-
 
 // ── PUT /:id/profile — Student updates their own profile / password ─────────
 router.put('/:id/profile', async (req, res) => {

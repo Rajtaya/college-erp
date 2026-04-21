@@ -127,12 +127,15 @@ export default function Dashboard({ student, onLogout, onStudentUpdate }) {
   const overallPct = totalClasses ? ((totalPresent/totalClasses)*100).toFixed(1) : 0;
 
   // Only use live API data — never trust stale localStorage student object
-  const isEnrollmentSubmitted = enrollmentSummary !== null
-    && enrollmentSummary.some(e => e.is_draft === 0 && e.status !== 'PENDING' && !e.admin_modified);
+  const semesterData = enrollmentSummary
+    ? enrollmentSummary.filter(e => !e.subject_semester || e.subject_semester === student.semester)
+    : [];
+  const isEnrollmentSubmitted = semesterData.length > 0
+    && semesterData.some(e => e.is_draft === 0 && e.status !== 'PENDING' && !e.admin_modified);
   const isProfileIncomplete = !student?.email || !student?.phone;
   const missingFields = [!student?.email && 'email', !student?.phone && 'mobile number'].filter(Boolean);
-  const acceptedSubjects = enrollmentSummary 
-        ? enrollmentSummary.filter(e => e.status === 'ACCEPTED')
+  const acceptedSubjects = enrollmentSummary
+        ? enrollmentSummary.filter(e => e.status === 'ACCEPTED' && (!e.subject_semester || e.subject_semester === student.semester))
     : [];
   const hasDraft = enrollmentSummary && enrollmentSummary.some(e => e.is_draft === 1);
   const adminModified = enrollmentSummary && enrollmentSummary.some(e => e.admin_modified === 1);
@@ -199,7 +202,7 @@ export default function Dashboard({ student, onLogout, onStudentUpdate }) {
         </div>
       )}
       <style>{'@keyframes popupFade { from { opacity:0; transform:scale(0.85); } to { opacity:1; transform:scale(1); } }'}</style>
-      <nav style={styles.nav}>
+      <nav style={styles.nav} className="erp-nav">
         <h2 style={styles.navTitle}>🎓 College ERP</h2>
         <div style={styles.navRight}>
           <span style={styles.studentName}>👤 {student.name}</span>
@@ -207,7 +210,7 @@ export default function Dashboard({ student, onLogout, onStudentUpdate }) {
         </div>
       </nav>
 
-      <div style={styles.tabs}>
+      <div style={styles.tabs} className="erp-tabs">
         {/* Profile completion banner */}
         {isProfileIncomplete && (
           <div style={{background:'#fffbeb',border:'2px solid #f6e05e',borderRadius:'10px',padding:'0.85rem 1.25rem',marginBottom:'1rem',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:'0.5rem'}}>
@@ -230,7 +233,7 @@ export default function Dashboard({ student, onLogout, onStudentUpdate }) {
         ))}
       </div>
 
-      <div style={styles.content}>
+      <div style={styles.content} className="erp-content">
 
         {activeTab === 'overview' && (
           <div>
@@ -508,7 +511,7 @@ export default function Dashboard({ student, onLogout, onStudentUpdate }) {
                                 : <span style={{color:'#a0aec0'}}>—</span>}
                             </td>
                           ))}
-                          <td style={{...styles.td,textAlign:'center',fontWeight:'700',color:pct>=60?'#276749':pct>=40?'#92400e':'#c53030'}}>
+                          <td style={{...styles.td,textAlign:'center',fontWeight:'700',color:pct===null?'#a0aec0':pct>=60?'#276749':pct>=40?'#92400e':'#c53030'}}>
                             {pct !== null ? `${pct}%` : '—'}
                           </td>
                           <td style={{...styles.td,textAlign:'center'}}>

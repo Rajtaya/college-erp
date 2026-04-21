@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { verify } = require('../middleware/auth');
+const { mapDeleteError } = require('../utils/safeDelete');
 
 router.use(verify());
 
@@ -25,10 +26,17 @@ router.post('/', verify('admin'), async (req, res) => {
 // Delete level
 router.delete('/:id', verify('admin'), async (req, res) => {
   try {
-    const [result] = await db.query('DELETE FROM levels WHERE level_id = ?', [req.params.id]);
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Level not found' });
+    const [result] = await db.query(
+      'DELETE FROM levels WHERE level_id = ?', [req.params.id]
+    );
+    if (result.affectedRows === 0)
+      return res.status(404).json({ error: 'Level not found' });
     res.json({ message: 'Level deleted' });
-  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+  } catch (err) {
+    console.error('DELETE /levels/:id error:', err);
+    const mapped = mapDeleteError(err, 'level');
+    res.status(mapped.status).json(mapped.body);
+  }
 });
 
 module.exports = router;

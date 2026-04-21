@@ -3,12 +3,17 @@ const router = express.Router();
 const db = require('../db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 const { verify } = require('../middleware/auth');
-require('dotenv').config();
+
+// Dummy hash for timing-attack mitigation
+const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString('hex'), 12);
 
 // ── Clerk Login ─────────────────────────────────────────────────────────────
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
+  if (!email || !password)
+    return res.status(400).json({ error: 'Email and password are required' });
   try {
     const [rows] = await db.query(
       `SELECT c.*, f.faculty_name
@@ -16,24 +21,37 @@ router.post('/login', async (req, res) => {
        JOIN faculties f ON c.faculty_id = f.faculty_id
        WHERE c.email = ? AND c.is_active = 1`, [email]
     );
-    if (!rows.length) return res.status(404).json({ error: 'Clerk not found' });
-    const valid = await bcrypt.compare(password, rows[0].password);
-    if (!valid) return res.status(401).json({ error: 'Invalid password' });
+
+    // Timing-attack mitigation — always compare
+    const hashToCheck = rows.length ? rows[0].password : DUMMY_HASH;
+    const valid = await bcrypt.compare(password, hashToCheck);
+    if (!rows.length || !valid) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Upgrade cost factor on successful login if still at old cost 10
+    if (rows[0].password.startsWith('$2b$10$') || rows[0].password.startsWith('$2a$10$')) {
+      const upgraded = await bcrypt.hash(password, 12);
+      await db.query('UPDATE clerks SET password = ? WHERE clerk_id = ?',
+        [upgraded, rows[0].clerk_id]);
+    }
+
+    const jti = crypto.randomUUID();
     const token = jwt.sign(
-      { id: rows[0].clerk_id, role: 'clerk', faculty_id: rows[0].faculty_id },
-      process.env.JWT_SECRET, { expiresIn: '8h' }
+      { id: rows[0].clerk_id, role: 'clerk', faculty_id: rows[0].faculty_id, jti },
+      process.env.JWT_SECRET,
+      { expiresIn: '8h', algorithm: 'HS256' }
     );
     const { password: _, ...clerkData } = rows[0];
     res.json({ token, clerk: clerkData });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
-// ── Middleware: extract faculty_id from token ───────────────────────────────
-const clerkOnly = verify('clerk', 'admin');
+// ── Middleware: clerk-only routes (admins use /admin/* instead) ─────────────
+const clerkOnly = verify('clerk');
 
-const getFacultyId = (req) => {
-  return req.user.faculty_id || null;
-};
+// Helper: extract faculty scope from JWT
+const getFacultyId = (req) => req.user.faculty_id || null;
 
 // ── Dashboard Stats ─────────────────────────────────────────────────────────
 router.get('/stats', clerkOnly, async (req, res) => {

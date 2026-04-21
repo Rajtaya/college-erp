@@ -26,8 +26,17 @@ export default function FeeClerkDashboard({ feeClerk, onLogout }) {
 
   // Collect payment modal
   const [collectModal, setCollectModal] = useState(null);
-  const [txnRef, setTxnRef] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState('CASH');
+  const [referenceDetails, setReferenceDetails] = useState('');
 
+  // Waive modal
+  const [waiveModal, setWaiveModal] = useState(null);
+  const [waiveReason, setWaiveReason] = useState('');
+
+  // Cashier session
+  const [session, setSession] = useState(null);
+  const [openingNotes, setOpeningNotes] = useState('');
+  const [closingNotes, setClosingNotes] = useState('');
   // Search student
   const [studentSearch, setStudentSearch] = useState('');
   const [studentResults, setStudentResults] = useState([]);
@@ -43,6 +52,7 @@ export default function FeeClerkDashboard({ feeClerk, onLogout }) {
   useEffect(() => {
     fetchProgrammes();
     fetchAcademicYears();
+    fetchSession();
   }, []);
 
   useEffect(() => {
@@ -61,7 +71,24 @@ export default function FeeClerkDashboard({ feeClerk, onLogout }) {
   const fetchTypeReport = async () => { try { const r = await API.get('/fee-clerks/reports/fee-type'); setTypeReport(r.data); } catch(e){} };
   const fetchProgrammes = async () => { try { const r = await API.get('/fee-clerks/programmes'); setProgrammes(r.data); } catch(e){} };
   const fetchAcademicYears = async () => { try { const r = await API.get('/fee-clerks/academic-years'); setAcademicYears(r.data); } catch(e){} };
+  const fetchSession = async () => { try { const r = await API.get('/fee-clerks/session/current'); setSession(r.data.session); } catch(e){} };
 
+  const openSession = async () => {
+    try {
+      await API.post('/fee-clerks/session/open', { opening_notes: openingNotes || undefined });
+      setOpeningNotes(''); showMsg('Session opened'); fetchSession();
+    } catch(e) { showMsg(e.response?.data?.error || 'Failed to open session', 'error'); }
+  };
+
+  const closeSession = async () => {
+    if (!window.confirm('Close session? Make sure you have handed over cash and tallied totals.')) return;
+    try {
+      const r = await API.post('/fee-clerks/session/close', { closing_notes: closingNotes || undefined });
+      setClosingNotes('');
+      showMsg(`Session closed. Cash: ₹${r.data.summary.total_cash}, UPI: ₹${r.data.summary.total_upi}, Receipts: ${r.data.summary.receipt_count}`);
+      fetchSession();
+    } catch(e) { showMsg(e.response?.data?.error || 'Failed to close session', 'error'); }
+  };
   useEffect(() => { if(activeTab === 'fees') fetchFees(); }, [filterStatus, filterProg]);
 
   // Search student
@@ -72,26 +99,53 @@ export default function FeeClerkDashboard({ feeClerk, onLogout }) {
 
   const selectStudent = async (s) => {
     setSelectedStudent(s); setStudentResults([]);
-    try { const r = await API.get('/fee-clerks/student/' + s.student_id); setStudentFees(r.data); } catch(e){}
+    try {
+      const r = await API.get('/fee-clerks/student/' + s.student_id);
+      // Attach student name/roll so Collect/Waive modals can show them
+      const feesWithInfo = r.data.map(f => ({
+        ...f,
+        roll_no: s.roll_no,
+        student_name: s.student_name
+      }));
+      setStudentFees(feesWithInfo);
+    } catch(e){}
   };
 
   // Collect payment
+// Collect payment
   const handleCollect = async () => {
     if (!collectModal) return;
+    if (!session) return showMsg('Open a cashier session first', 'error');
     try {
-      await API.put('/fee-clerks/collect/' + collectModal.fee_id, { transaction_ref: txnRef || undefined });
-      showMsg('Payment collected!');
-      setCollectModal(null); setTxnRef('');
-      fetchFees(); fetchStats();
+      await API.put('/fee-clerks/collect/' + collectModal.fee_id, {
+        payment_method: paymentMethod,
+        reference_details: referenceDetails || undefined
+      });
+      showMsg(`Payment collected via ${paymentMethod}`);
+      setCollectModal(null); setPaymentMethod('CASH'); setReferenceDetails('');
+      fetchFees(); fetchStats(); fetchSession();
       if (selectedStudent) selectStudent(selectedStudent);
     } catch(e) { showMsg(e.response?.data?.error || 'Failed', 'error'); }
   };
 
   // Waive fee
-  const handleWaive = async (feeId) => {
-    if (!window.confirm('Waive this fee?')) return;
-    try { await API.put('/fee-clerks/waive/' + feeId); showMsg('Fee waived'); fetchFees(); fetchStats(); if(selectedStudent) selectStudent(selectedStudent); }
-    catch(e) { showMsg('Failed', 'error'); }
+// Open waive modal
+  const handleWaive = (fee) => {
+    if (!session) return showMsg('Open a cashier session first', 'error');
+    setWaiveModal(fee); setWaiveReason('');
+  };
+
+  // Confirm waive
+  const confirmWaive = async () => {
+    if (!waiveModal) return;
+    if (waiveReason.trim().length < 10) return showMsg('Reason must be at least 10 characters', 'error');
+    try {
+      await API.put('/fee-clerks/waive/' + waiveModal.fee_id, { reason: waiveReason.trim() });
+      showMsg('Fee waived');
+      setWaiveModal(null); setWaiveReason('');
+      fetchFees(); fetchStats(); fetchSession();
+      if (selectedStudent) selectStudent(selectedStudent);
+    } catch(e) { showMsg(e.response?.data?.error || 'Failed', 'error'); }
   };
 
   // Add structure
@@ -165,6 +219,43 @@ export default function FeeClerkDashboard({ feeClerk, onLogout }) {
             {t.label}
           </button>
         ))}
+      </div>
+
+      {/* ── CASHIER SESSION BAR ──────────────────────────────── */}
+      <div style={{
+        padding:'0.75rem 2rem', background: session ? '#c6f6d5' : '#fed7d7',
+        borderBottom:'1px solid #e2e8f0', display:'flex', alignItems:'center',
+        justifyContent:'space-between', gap:'1rem', flexWrap:'wrap'
+      }}>
+        {session ? (
+          <>
+            <div style={{fontSize:'0.85rem', color:'#276749'}}>
+              <strong>✅ Session OPEN</strong> · Opened: {new Date(session.opened_at).toLocaleString()}
+              {' · '}Cash ₹{fmt(session.total_cash)} · UPI ₹{fmt(session.total_upi)} ·
+              {' '}NEFT ₹{fmt(session.total_neft_rtgs)} · Card ₹{fmt(session.total_card)} ·
+              {' '}<strong>Total ₹{fmt(session.total_collected)}</strong> ({session.receipt_count} receipts)
+              {Number(session.total_waived) > 0 && <> · Waived ₹{fmt(session.total_waived)}</>}
+            </div>
+            <div style={{display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap'}}>
+              <input style={{...st.searchInput, fontSize:'0.8rem'}}
+                placeholder="Closing notes (optional)"
+                value={closingNotes} onChange={e => setClosingNotes(e.target.value)} />
+              <button style={{...st.actionBtn, background:'#c53030'}} onClick={closeSession}>🔒 Close Session</button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{fontSize:'0.85rem', color:'#c53030'}}>
+              <strong>🔴 No active session.</strong> Open a session to collect payments or waive fees.
+            </div>
+            <div style={{display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap'}}>
+              <input style={{...st.searchInput, fontSize:'0.8rem'}}
+                placeholder="Opening notes (optional)"
+                value={openingNotes} onChange={e => setOpeningNotes(e.target.value)} />
+              <button style={{...st.actionBtn, background:'#38a169'}} onClick={openSession}>🔓 Open Session</button>
+            </div>
+          </>
+        )}
       </div>
 
       <div style={st.content} className="erp-content">
@@ -266,7 +357,7 @@ export default function FeeClerkDashboard({ feeClerk, onLogout }) {
                           {f.status !== 'PAID' && (
                             <div style={{display:'flex', gap:'4px'}}>
                               <button style={{...st.smallBtn, background:'#38a169'}} onClick={() => { setCollectModal(f); setTxnRef(''); }}>Collect</button>
-                              <button style={{...st.smallBtn, background:'#e53e3e'}} onClick={() => handleWaive(f.fee_id)}>Waive</button>
+                              <button style={{...st.smallBtn, background:'#e53e3e'}} onClick={() => handleWaive(f)}>Waive</button>
                             </div>
                           )}
                         </td>
@@ -429,7 +520,7 @@ export default function FeeClerkDashboard({ feeClerk, onLogout }) {
                             {f.status !== 'PAID' && (
                               <div style={{display:'flex', gap:'4px'}}>
                                 <button style={{...st.smallBtn, background:'#38a169'}} onClick={() => { setCollectModal(f); setTxnRef(''); }}>Collect</button>
-                                <button style={{...st.smallBtn, background:'#e53e3e'}} onClick={() => handleWaive(f.fee_id)}>Waive</button>
+                                <button style={{...st.smallBtn, background:'#e53e3e'}} onClick={() => handleWaive(f)}>Waive</button>
                               </div>
                             )}
                           </td>
@@ -537,12 +628,54 @@ export default function FeeClerkDashboard({ feeClerk, onLogout }) {
             <p><strong>{collectModal.roll_no}</strong> — {collectModal.student_name}</p>
             <p>{collectModal.fee_type} · <strong>₹{fmt(collectModal.amount)}</strong></p>
             <div style={{margin:'1rem 0'}}>
-              <label style={{display:'block', marginBottom:'0.35rem', fontWeight:'600', fontSize:'0.85rem'}}>Transaction Reference (optional)</label>
-              <input style={st.formInput} placeholder="e.g. RCP12345 or UPI ref" value={txnRef} onChange={e => setTxnRef(e.target.value)} />
+              <label style={{display:'block', marginBottom:'0.35rem', fontWeight:'600', fontSize:'0.85rem'}}>Payment Method *</label>
+              <select style={st.formInput} value={paymentMethod} onChange={e => setPaymentMethod(e.target.value)}>
+                <option value="CASH">💵 Cash</option>
+                <option value="UPI">📱 UPI</option>
+                <option value="NEFT_RTGS">🏦 NEFT / RTGS</option>
+                <option value="CARD">💳 Card (POS)</option>
+              </select>
+            </div>
+            <div style={{margin:'1rem 0'}}>
+              <label style={{display:'block', marginBottom:'0.35rem', fontWeight:'600', fontSize:'0.85rem'}}>Reference (optional)</label>
+              <input style={st.formInput}
+                placeholder={
+                  paymentMethod === 'UPI' ? 'UPI ref no.' :
+                  paymentMethod === 'NEFT_RTGS' ? 'UTR no.' :
+                  paymentMethod === 'CARD' ? 'Last 4 digits / approval code' :
+                  'Counter receipt no.'
+                }
+                value={referenceDetails} onChange={e => setReferenceDetails(e.target.value)} />
             </div>
             <div style={{display:'flex', gap:'8px', justifyContent:'flex-end'}}>
               <button style={{...st.actionBtn, background:'#a0aec0'}} onClick={() => setCollectModal(null)}>Cancel</button>
               <button style={{...st.actionBtn, background:'#38a169'}} onClick={handleCollect}>✅ Confirm Payment</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── WAIVE FEE MODAL ────────────────────────────────────── */}
+      {waiveModal && (
+        <div style={st.modalOverlay} onClick={() => setWaiveModal(null)}>
+          <div style={st.modal} className="erp-modal" onClick={e => e.stopPropagation()}>
+            <h3 style={{margin:'0 0 1rem', color:'#c53030'}}>⚠️ Waive Fee</h3>
+            <p><strong>{waiveModal.roll_no}</strong> — {waiveModal.student_name}</p>
+            <p>{waiveModal.fee_type} · <strong>₹{fmt(waiveModal.amount)}</strong></p>
+            <div style={{margin:'1rem 0'}}>
+              <label style={{display:'block', marginBottom:'0.35rem', fontWeight:'600', fontSize:'0.85rem'}}>
+                Reason for waiver * <span style={{color:'#718096', fontWeight:'400'}}>(min 10 characters — will be logged)</span>
+              </label>
+              <textarea style={{...st.formInput, minHeight:'80px', resize:'vertical'}}
+                placeholder="e.g. Financial hardship, approved by principal on DD/MM/YYYY"
+                value={waiveReason} onChange={e => setWaiveReason(e.target.value)} />
+              <small style={{color: waiveReason.trim().length < 10 ? '#c53030' : '#276749'}}>
+                {waiveReason.trim().length}/10 characters
+              </small>
+            </div>
+            <div style={{display:'flex', gap:'8px', justifyContent:'flex-end'}}>
+              <button style={{...st.actionBtn, background:'#a0aec0'}} onClick={() => setWaiveModal(null)}>Cancel</button>
+              <button style={{...st.actionBtn, background:'#e53e3e'}} onClick={confirmWaive}>Confirm Waiver</button>
             </div>
           </div>
         </div>

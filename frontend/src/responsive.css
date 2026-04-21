@@ -1,0 +1,295 @@
+/* COLLEGE ERP — RESPONSIVE CSS */
+
+/* NAV */
+.erp-nav { display:flex; justify-content:space-between; align-items:center; }
+@media (max-width:600px) {
+  .erp-nav { flex-wrap:wrap; padding:0.75rem 1rem !important; gap:0.5rem; }
+  .erp-nav h2 { font-size:1rem !important; width:100%; }
+}
+
+/* TABS */
+.erp-tabs { overflow-x:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; }
+.erp-tabs::-webkit-scrollbar { display:none; }
+.erp-tabs button { white-space:nowrap; flex-shrink:0; }
+@media (max-width:600px) {
+  .erp-tabs { padding:0 0.5rem !important; }
+  .erp-tabs button { padding:0.65rem 0.8rem !important; font-size:0.82rem !important; }
+}
+
+/* CONTENT */
+@media (max-width:768px) { .erp-content { padding:1rem !important; } }
+@media (max-width:480px) { .erp-content { padding:0.75rem !important; } }
+
+/* CARDS */
+@media (max-width:600px) { .erp-card { padding:1rem !important; border-radius:8px !important; } }
+
+/* CARD HEADER */
+.erp-card-header { display:flex; justify-content:space-between; align-items:center; gap:0.75rem; flex-wrap:wrap; }
+@media (max-width:600px) { .erp-card-header { flex-direction:column; align-items:flex-start; } }
+
+/* FORM GRIDS */
+.erp-form-grid { display:grid; gap:12px; align-items:end; }
+@media (max-width:768px) {
+  .erp-form-grid-3, .erp-form-grid-4, .erp-form-grid-2 { grid-template-columns:1fr !important; }
+}
+
+/* STATS GRID */
+.erp-stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:1rem; }
+@media (max-width:600px) { .erp-stats-grid { grid-template-columns:repeat(2,1fr); gap:0.75rem; } }
+@media (max-width:380px) { .erp-stats-grid { grid-template-columns:1fr; } }
+
+/* TABLES */
+.erp-table-wrap { overflow-x:auto; -webkit-overflow-scrolling:touch; }
+@media (max-width:768px) {
+  .erp-table-wrap table { font-size:0.8rem; white-space:nowrap; }
+  .erp-table-wrap th, .erp-table-wrap td { padding:0.4rem 0.5rem !important; }
+}
+
+/* SUBJECT HEADER */
+@media (max-width:600px) {
+  .erp-subject-header { flex-direction:column !important; align-items:flex-start !important; gap:0.5rem; padding:10px 12px !important; }
+}
+
+/* BUTTON ROWS */
+.erp-btn-row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+@media (max-width:600px) { .erp-btn-row { width:100%; } .erp-btn-row > button { flex:1; text-align:center; } }
+
+/* SEARCH */
+@media (max-width:600px) { .erp-search { width:100% !important; } }
+
+/* LOGIN TOGGLE */
+.erp-login-toggle { display:flex; justify-content:center; gap:1rem; padding:1.5rem; background:#1a202c; }
+@media (max-width:500px) {
+  .erp-login-toggle { flex-wrap:wrap; gap:0.4rem; padding:0.75rem; }
+  .erp-login-toggle button { padding:0.5rem 0.75rem !important; font-size:0.8rem !important; flex:1 1 40%; }
+}
+
+/* LOGIN FORM */
+@media (max-width:500px) { .erp-login-form { width:92vw !important; padding:1.25rem !important; } }
+
+/* GRADIENT HEADER (Clerk) */
+@media (max-width:600px) {
+  .erp-gradient-header { flex-direction:column !important; padding:1rem !important; gap:0.5rem; text-align:center; }
+  .erp-gradient-header h1 { font-size:1.1rem !important; }
+}
+
+/* MODAL */
+@media (max-width:600px) { .erp-modal { max-width:98% !important; width:98% !important; margin:0.5rem !important; padding:1rem !important; } }
+
+/* iOS zoom prevention */
+@media (max-width:768px) { select, input, textarea { font-size:16px !important; } button { min-height:38px; } }
+
+/* Scrollbar */
+::-webkit-scrollbar { height:4px; width:6px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:#cbd5e0; border-radius:4px; }
+
+/* Print */
+@media print { .erp-nav, .erp-tabs, button, .erp-login-toggle { display:none !important; } }
+
+/* ADMIN TABLES — direct overflow */
+.erp-table { display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+@media (max-width:768px) {
+  .erp-table { font-size:0.8rem; }
+  .erp-table th, .erp-table td { padding:0.4rem 0.5rem !important; white-space:nowrap; }
+}
+
+/* FORM GRID overrides for admin forms */
+@media (max-width:768px) {
+  .erp-form-grid-3, .erp-form-grid-4 { display:flex !important; flex-direction:column !important; }
+  .erp-form-grid-3 input, .erp-form-grid-3 select,
+  .erp-form-grid-4 input, .erp-form-grid-4 select { width:100% !important; box-sizing:border-box; }
+}
+
+/* Student Dashboard stat cards */
+@media (max-width:600px) {
+  .erp-content > div[style*="grid"] { grid-template-columns:repeat(2,1fr) !important; }
+}
+
+/* Fee Clerk search row */
+@media (max-width:600px) {
+  .erp-card > div[style*="flex"] { flex-direction:column !important; }
+  .erp-card input[style*="flex"], .erp-card select { width:100% !important; }
+}
+
+/* ADMIN TABLES — direct overflow */
+.erp-table { display:block; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+@media (max-width:768px) {
+  .erp-table { font-size:0.8rem; }
+  .erp-table th, .erp-table td { padding:0.4rem 0.5rem !important; white-space:nowrap; }
+}
+
+/* FORM GRID overrides for admin forms */
+@media (max-width:768px) {
+  .erp-form-grid-3, .erp-form-grid-4 { display:flex !important; flex-direction:column !important; }
+  .erp-form-grid-3 input, .erp-form-grid-3 select,
+  .erp-form-grid-4 input, .erp-form-grid-4 select { width:100% !important; box-sizing:border-box; }
+}
+
+/* Student Dashboard stat cards */
+@media (max-width:600px) {
+  .erp-content > div[style*="grid"] { grid-template-columns:repeat(2,1fr) !important; }
+}
+
+/* Fee Clerk search row */
+@media (max-width:600px) {
+  .erp-card > div[style*="flex"] { flex-direction:column !important; }
+  .erp-card input[style*="flex"], .erp-card select { width:100% !important; }
+}
+/* ============================================================
+   STUDENT ENROLLMENT — mobile polish
+   Appended to responsive.css by the install script.
+   ============================================================ */
+
+/* Enrollment page header: back button + title + student info */
+.erp-enroll-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+@media (max-width: 600px) {
+  .erp-enroll-header {
+    gap: 0.5rem !important;
+    padding: 0.75rem 1rem !important;
+  }
+  .erp-enroll-header h2 {
+    font-size: 1.1rem !important;
+  }
+  .erp-enroll-header p {
+    font-size: 0.8rem !important;
+    line-height: 1.3;
+  }
+}
+
+/* Submitted / info banners */
+@media (max-width: 600px) {
+  .erp-enroll-banner {
+    padding: 0.75rem 1rem !important;
+    font-size: 0.85rem !important;
+    margin: 0.5rem 0 !important;
+    border-radius: 8px !important;
+  }
+}
+
+/* Summary bar: total / accepted / error / pending */
+.erp-enroll-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+@media (max-width: 600px) {
+  .erp-enroll-summary {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.5rem !important;
+  }
+  .erp-enroll-summary > div {
+    padding: 0.75rem !important;
+    border-radius: 8px !important;
+  }
+  .erp-enroll-summary > div > div:first-child {
+    font-size: 1.5rem !important;
+  }
+  .erp-enroll-summary > div > div:last-child {
+    font-size: 0.7rem !important;
+  }
+}
+
+/* Category blocks */
+@media (max-width: 600px) {
+  .erp-enroll-category {
+    margin-bottom: 1rem !important;
+    border-radius: 8px !important;
+  }
+  .erp-enroll-category > div:first-child {
+    padding: 0.75rem 1rem !important;
+    flex-wrap: wrap !important;
+    gap: 0.5rem !important;
+  }
+  .erp-enroll-category h3,
+  .erp-enroll-category span[style*="font-size"] {
+    font-size: 0.95rem !important;
+  }
+}
+
+/* Tables inside enrollment — horizontal scroll with nicer breakpoints */
+.erp-enroll-table {
+  width: 100%;
+}
+@media (max-width: 900px) {
+  /* wrap table in scroll container via parent */
+  .erp-enroll-category > div:last-child,
+  .erp-enroll-category table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .erp-enroll-table {
+    min-width: 640px;   /* keep columns from squishing */
+    font-size: 0.85rem !important;
+  }
+  .erp-enroll-table th,
+  .erp-enroll-table td {
+    padding: 0.5rem 0.6rem !important;
+    white-space: nowrap;
+  }
+  .erp-enroll-table td:nth-child(2),  /* Paper Name column */
+  .erp-enroll-table td:nth-child(1) { /* Discipline / Course code */
+    white-space: normal;              /* allow wrapping on name columns */
+    min-width: 180px;
+  }
+  /* Remarks input */
+  .erp-enroll-table input[type="text"] {
+    font-size: 0.85rem !important;
+    padding: 0.35rem 0.5rem !important;
+    min-width: 120px;
+  }
+}
+
+@media (max-width: 480px) {
+  .erp-enroll-table {
+    font-size: 0.78rem !important;
+    min-width: 560px;
+  }
+  .erp-enroll-table button {
+    padding: 0.35rem 0.6rem !important;
+    font-size: 0.75rem !important;
+  }
+}
+
+/* Hide End Term (col 6) and Total (col 7) columns on mobile only */
+@media (max-width: 768px) {
+  .erp-enroll-table thead tr th:nth-child(6),
+  .erp-enroll-table thead tr th:nth-child(7),
+  .erp-enroll-table tbody tr td:nth-child(6),
+  .erp-enroll-table tbody tr td:nth-child(7) {
+    display: none !important;
+  }
+  /* Now table can be narrower — shrink min-width accordingly */
+  .erp-enroll-table {
+    min-width: 520px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .erp-enroll-table {
+    min-width: 480px !important;
+  }
+}
+
+/* Summary bar now has 3 items (Total / Accepted / Pending) */
+.erp-enroll-summary {
+  grid-template-columns: repeat(3, 1fr) !important;
+}
+@media (max-width: 600px) {
+  .erp-enroll-summary {
+    grid-template-columns: repeat(3, 1fr) !important;
+    gap: 0.4rem !important;
+  }
+  .erp-enroll-summary > div {
+    padding: 0.5rem !important;
+  }
+  .erp-enroll-summary > div > span:first-child {
+    font-size: 1.3rem !important;
+  }
+}

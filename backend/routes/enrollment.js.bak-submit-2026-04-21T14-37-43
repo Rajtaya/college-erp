@@ -273,15 +273,13 @@ router.post('/save-draft/:student_id', verify('student', 'admin'), async (req, r
         d.status || 'PENDING', d.is_major || 0, d.remarks || null,
         student.semester, student.academic_year_id || null
       ]);
-await db.query(
+      await db.query(
         `INSERT INTO student_subject_enrollment
            (student_id, subject_id, status, is_major, remarks, is_draft, semester, academic_year_id)
          VALUES ${placeholders}
          ON DUPLICATE KEY UPDATE
-           status   = IF(admin_modified = 1, status,   VALUES(status)),
-           is_major = IF(admin_modified = 1, is_major, VALUES(is_major)),
-           remarks  = IF(admin_modified = 1, remarks,  VALUES(remarks)),
-           is_draft = IF(admin_modified = 1, is_draft, 1)`,
+           status=VALUES(status), is_major=VALUES(is_major),
+           remarks=VALUES(remarks), is_draft=1`,
         values
       );
     }
@@ -605,16 +603,14 @@ router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) 
     // Skip admin-modified subjects, then batch INSERT the rest
     const toInsert = enrollments.filter(e => !adminSubjectIds.has(e.subject_id));
     if (toInsert.length > 0) {
-      // Include semester + academic_year_id for the CHECK constraint on new rows
-      const placeholders = toInsert.map(() => '(?,?,?,?,?,0,?,?)').join(',');
+      const placeholders = toInsert.map(() => '(?,?,?,?,?,0)').join(',');
       const values = toInsert.flatMap(e => [
         req.params.student_id, e.subject_id,
-        e.status, e.is_major || false, e.remarks || '',
-        sem, student.academic_year_id || null
+        e.status, e.is_major || false, e.remarks || ''
       ]);
       await db.query(
         `INSERT INTO student_subject_enrollment
-           (student_id, subject_id, status, is_major, remarks, is_draft, semester, academic_year_id)
+           (student_id, subject_id, status, is_major, remarks, is_draft)
          VALUES ${placeholders}
          ON DUPLICATE KEY UPDATE
            status=VALUES(status), is_major=VALUES(is_major),
@@ -624,23 +620,11 @@ router.post('/submit/:student_id', verify('student', 'admin'), async (req, res) 
     }
 
     // Mark student enrollment as submitted
-   // Mark student enrollment as submitted
-    await db.query('UPDATE students SET enrollment_submitted = 1, enrollment_submitted_at = NOW() WHERE student_id = ?', [req.params.student_id]);
+    await db.query('UPDATE students SET enrollment_submitted = 1 WHERE student_id = ?', [req.params.student_id]);
 
-const skipped_admin_locked = enrollments.length - toInsert.length;
-    res.json({
-      message: 'Enrollment submitted successfully!',
-      inserted: toInsert.length,
-      skipped_admin_locked,
-      total_requested: enrollments.length
-    });
-  } catch (err) {
-    console.error('SUBMIT ERROR:', err);
-    res.status(500).json({ error: "Internal server error" });
-  }
+    res.json({ message: 'Enrollment submitted successfully!' });
+  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
 });
-
-// ── POST /enroll-semester — Auto-enroll student in all subjects for their semester (admin only)
 
 // ── POST /enroll-semester — Auto-enroll student in all subjects for their semester (admin only)
 router.post("/enroll-semester", verify("admin"), async (req, res) => {

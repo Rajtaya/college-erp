@@ -1072,10 +1072,9 @@ export default function AdminDashboard({ admin, onLogout }) {
     try {
       const selectedProg = programmes.find(p => String(p.programme_id) === String(form.programme_id));
       const finalFacultyId = studentFaculty || selectedProg?.faculty_id || '';
-      // Use the form's dedicated first_name / last_name inputs (not legacy "name" field)
-      const first_name = (form.first_name || '').trim();
-      const last_name  = (form.last_name  || '').trim();
-      if (!first_name) { showMsg('First name is required', 'error'); return; }
+      const nameParts = (form.name || '').trim().split(/\s+/);
+      const first_name = nameParts[0] || '';
+      const last_name = nameParts.slice(1).join(' ') || '';
       const discipline_ids = [form.discipline_1, form.discipline_2, form.discipline_3].filter(Boolean).map(Number);
       const payload = { ...form, first_name, last_name, level_id: studentLevel, faculty_id: finalFacultyId, discipline_ids };
       delete payload.name;

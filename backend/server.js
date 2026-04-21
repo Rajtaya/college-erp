@@ -63,6 +63,8 @@ const globalLimiter = rateLimit({
 app.use('/api/auth/student/login', loginLimiter);
 app.use('/api/auth/teacher/login', loginLimiter);
 app.use('/api/admin/login',        loginLimiter);
+app.use('/api/clerks/login',     loginLimiter);
+app.use('/api/fee-clerks/login', loginLimiter);
 app.use('/api', globalLimiter);
 
 // ── Routes ───────────────────────────────────────────────────────────────────

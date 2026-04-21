@@ -85,7 +85,7 @@ router.get('/student/:student_id/summary', async (req, res) => {
       `SELECT s.subject_id, s.subject_name, s.subject_code,
               COUNT(*) AS total,
               SUM(a.status = 'PRESENT') AS present,
-              ROUND(SUM(a.status = 'PRESENT') / COUNT(*) * 100, 1) AS percentage
+              ROUND(SUM(a.status = 'PRESENT') / NULLIF(COUNT(*), 0) * 100, 1) AS percentage
        FROM attendance a
        JOIN subjects s ON a.subject_id = s.subject_id
        WHERE a.student_id = ?
@@ -103,7 +103,7 @@ router.get('/subject/:subject_id/date/:date', async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT a.attendance_id, a.student_id, a.status,
-              CONCAT(st.first_name, ' ', st.last_name) AS name, st.roll_no
+              TRIM(CONCAT(IFNULL(st.first_name,''), ' ', IFNULL(st.last_name,''))) AS name, st.roll_no
        FROM attendance a
        JOIN students st ON a.student_id = st.student_id
        WHERE a.subject_id = ? AND a.date = ?

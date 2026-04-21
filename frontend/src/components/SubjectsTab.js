@@ -74,15 +74,15 @@ export default function SubjectsTab({ levels, faculties, programmes, showMsg }) 
 
   const [subjectTeachers, setSubjectTeachers] = useState({}); // subject_id -> [teachers]
 
-  const fetchSubjectTeachers = async (subject_id) => {
+  const fetchAllSubjectTeachers = async () => {
     try {
-      const r = await API.get(`/subjects/${subject_id}/teachers`);
-      setSubjectTeachers(prev => ({ ...prev, [subject_id]: r.data }));
+      const r = await API.get('/subjects/all-teachers');
+      setSubjectTeachers(r.data);
     } catch(e) {}
   };
 
   useEffect(() => {
-    subjects.forEach(s => fetchSubjectTeachers(s.subject_id));
+    if (subjects.length) fetchAllSubjectTeachers();
   }, [subjects]);
 
   const handleAssignTeacher = async (subject_id, teacher_id) => {
@@ -90,7 +90,7 @@ export default function SubjectsTab({ levels, faculties, programmes, showMsg }) 
     try {
       await API.post(`/subjects/${subject_id}/teachers`, { teacher_id, section: 'A' });
       showMsg('Teacher assigned!');
-      fetchSubjectTeachers(subject_id);
+      fetchAllSubjectTeachers();
     } catch(e) { showMsg('Failed to assign teacher', 'error'); }
   };
 
@@ -98,7 +98,7 @@ export default function SubjectsTab({ levels, faculties, programmes, showMsg }) 
     try {
       await API.delete(`/subjects/${subject_id}/teachers/${teacher_id}`);
       showMsg('Teacher removed!');
-      fetchSubjectTeachers(subject_id);
+      fetchAllSubjectTeachers();
     } catch(e) { showMsg('Failed to remove teacher', 'error'); }
   };
 

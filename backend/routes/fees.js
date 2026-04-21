@@ -1,7 +1,9 @@
+
 const express = require('express');
 const router  = express.Router();
 const db      = require('../db');
 const { verify } = require('../middleware/auth');
+const { safeDelete, mapDeleteError } = require('../utils/safeDelete');
 
 router.use(verify());
 
@@ -125,14 +127,25 @@ router.put('/:fee_id', verify('admin'), async (req, res) => {
 
 // ── DELETE /:fee_id — Delete fee record (admin only) ───────────────────────
 router.delete('/:fee_id', verify('admin'), async (req, res) => {
+  const feeId = req.params.fee_id;
   try {
-    const [result] = await db.query(
-      'DELETE FROM fees WHERE fee_id = ?', [req.params.fee_id]
+    const [check] = await db.query(
+      'SELECT fee_id FROM fees WHERE fee_id = ?', [feeId]
     );
-    if (result.affectedRows === 0)
-      return res.status(404).json({ error: 'Fee record not found' });
-    res.json({ message: 'Fee deleted' });
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
-});
+    if (!check.length) return res.status(404).json({ error: 'Fee record not found' });
 
+    await safeDelete(db, {
+      parent: { table: 'fees', column: 'fee_id', id: feeId },
+      children: [
+        { table: 'fee_payments', column: 'fee_id' },
+      ],
+    });
+
+    res.json({ message: 'Fee deleted' });
+  } catch (err) {
+    console.error('DELETE /fees/:fee_id error:', err);
+    const mapped = mapDeleteError(err, 'fee record');
+    res.status(mapped.status).json(mapped.body);
+  }
+});
 module.exports = router;

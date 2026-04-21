@@ -472,7 +472,7 @@ export default function StudentEnrollment({ student, onBack }) {
         </div>
       )}
       <style>{'@keyframes popupFade { from { opacity:0; transform:scale(0.85); } to { opacity:1; transform:scale(1); } }'}</style>
-      <div style={s.header} className="erp-enroll-header">
+      <div style={s.header}>
         <button style={s.backBtn} onClick={onBack}>← Back</button>
         <div>
           <h2 style={s.headerTitle}>📋 Subject Enrollment</h2>
@@ -515,10 +515,10 @@ export default function StudentEnrollment({ student, onBack }) {
       )}
 
       {submitted ? (
-        <div style={s.submittedBanner} className="erp-enroll-banner">✅ <strong>Enrollment Submitted!</strong> Contact admin if you need changes.</div>
+        <div style={s.submittedBanner}>✅ <strong>Enrollment Submitted!</strong> Contact admin if you need changes.</div>
       ) : (
         <>
-        <div style={s.infoBanner} className="erp-enroll-banner">ℹ️ <strong>One-time action.</strong> Review all subjects carefully before submitting.</div>
+        <div style={s.infoBanner}>ℹ️ <strong>One-time action.</strong> Review all subjects carefully before submitting.</div>
         {!hasMajor && !isPG && (
           <div style={{background:'#fffbeb', border:'2px solid #f6e05e', borderRadius:'10px', padding:'1rem 1.5rem', marginBottom:'1rem', color:'#744210'}}>
             <strong>⚠️ MAJOR subjects not yet assigned.</strong> Contact your admin to assign your DSC subjects before final submission. You can still save drafts of other subjects.
@@ -527,10 +527,11 @@ export default function StudentEnrollment({ student, onBack }) {
         </>
       )}
 
-      <div style={s.summaryBar} className="erp-enroll-summary">
+      <div style={s.summaryBar}>
         {[
           {l:'Total',        v:totalSubjects, bg:'#ebf8ff'},
           {l:'Accepted',     v:acceptedCount, bg:'#f0fff4', c:'#276749'},
+          {l:'Error Raised', v:rejectedCount, bg:'#fff5f5', c:'#c53030'},
           {l:'Pending',      v:pendingCount,  bg:'#fffbeb', c:'#92400e'},
         ].map(item => (
           <div key={item.l} style={{...s.summaryItem, background:item.bg}}>
@@ -545,7 +546,7 @@ export default function StudentEnrollment({ student, onBack }) {
         const isBAMajor = category === 'MAJOR' && !isPG
           && String(student.course||'').toUpperCase() === 'B.A';
         return (
-          <div key={category} style={s.categoryBlock} className="erp-enroll-category">
+          <div key={category} style={s.categoryBlock}>
             <div style={{...s.categoryHeader, background: categoryColors[category]||'#667eea'}}>
               <div>
                 <span style={s.catTitle}>{categoryLabels[category]||category}</span>
@@ -568,7 +569,7 @@ export default function StudentEnrollment({ student, onBack }) {
             </div>
 
             {isBAMajor ? (
-            <table style={s.table} className="erp-enroll-table">
+            <table style={s.table}>
               <thead>
                 <tr>
                   <th style={s.th}>Discipline</th>
@@ -600,7 +601,7 @@ export default function StudentEnrollment({ student, onBack }) {
               </tbody>
             </table>
             ) : (
-            <table style={s.table} className="erp-enroll-table">
+            <table style={s.table}>
               <thead>
                 <tr>
                   <th style={s.th}>Course Code</th>

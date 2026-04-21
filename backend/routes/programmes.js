@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { verify } = require('../middleware/auth');
+const { mapDeleteError } = require('../utils/safeDelete');
 
 router.use(verify());
 
@@ -64,10 +65,18 @@ router.post('/', verify('admin'), async (req, res) => {
 // Delete programme
 router.delete('/:id', verify('admin'), async (req, res) => {
   try {
-    const [result] = await db.query('DELETE FROM programmes WHERE programme_id = ?', [req.params.id]);
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Programme not found' });
+    const [result] = await db.query(
+      'DELETE FROM programmes WHERE programme_id = ?', [req.params.id]
+    );
+    if (result.affectedRows === 0)
+      return res.status(404).json({ error: 'Programme not found' });
     res.json({ message: 'Programme deleted' });
-  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+  } catch (err) {
+    console.error('DELETE /programmes/:id error:', err);
+    // Programmes have students, subjects, and programme_subject_pool rows —
+    // cascading is dangerous, so we refuse with a clear message.
+    const mapped = mapDeleteError(err, 'programme');
+    res.status(mapped.status).json(mapped.body);
+  }
 });
-
 module.exports = router;

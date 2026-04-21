@@ -1072,20 +1072,19 @@ export default function AdminDashboard({ admin, onLogout }) {
     try {
       const selectedProg = programmes.find(p => String(p.programme_id) === String(form.programme_id));
       const finalFacultyId = studentFaculty || selectedProg?.faculty_id || '';
-      // Use the form's dedicated first_name / last_name inputs (not legacy "name" field)
-      const first_name = (form.first_name || '').trim();
-      const last_name  = (form.last_name  || '').trim();
-      if (!first_name) { showMsg('First name is required', 'error'); return; }
-      const discipline_ids = [form.discipline_1, form.discipline_2, form.discipline_3].filter(Boolean).map(Number);
-      const payload = { ...form, first_name, last_name, level_id: studentLevel, faculty_id: finalFacultyId, discipline_ids };
+      const nameParts = (form.name || '').trim().split(/\s+/);
+      const first_name = nameParts[0] || '';
+      const last_name = nameParts.slice(1).join(' ') || '';
+      const payload = { ...form, first_name, last_name, level_id: studentLevel, faculty_id: finalFacultyId };
       delete payload.name;
+      const discIds = [form.discipline_1, form.discipline_2, form.discipline_3].filter(Boolean).map(Number);
       delete payload.discipline_1; delete payload.discipline_2; delete payload.discipline_3;
       const result = await API.post('/students', payload);
-      const majors = result.data.majors_assigned || 0;
-      const discs  = result.data.disciplines_assigned || 0;
-      const extra  = (discs || majors) ? ` (${discs} disciplines, ${majors} MAJORs auto-assigned)` : '';
-      showMsg('Student added!' + extra);
-      setForm({}); setStudentLevel(''); setStudentFaculty(''); fetchStudents();
+      // If disciplines were selected, assign them
+      if (discIds.length > 0 && result.data.student_id) {
+        await API.post('/admin/students/' + result.data.student_id + '/disciplines', { discipline_ids: discIds });
+      }
+      showMsg('Student added!'); setForm({}); setStudentLevel(''); setStudentFaculty(''); fetchStudents();
     } catch(err) { showMsg(err.response?.data?.error || 'Error', 'error'); }
   };
 

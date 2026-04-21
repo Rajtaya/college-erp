@@ -95,7 +95,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
       const existing = await API.get(`/attendance/subject/${attSubject}/date/${attDate}`).catch(() => ({ data: [] }));
       const existingMap = {};
       existing.data.forEach(a => { existingMap[a.student_id] = a.status; });
-      setAttStudents(r.data.map(s => ({ ...s, status: existingMap[s.student_id] || 'PRESENT' })));
+      setAttStudents(r.data.map(s => ({ ...s, status: existingMap[s.student_id] || 'ABSENT' })));
     } catch(e) { showMsg('Failed to load students', 'error'); }
     setAttLoading(false);
   };
@@ -280,7 +280,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
         </div>
       </nav>
 
-      <div style={st.tabs}>
+      <div className="erp-tabs" style={st.tabs}>
         {['subjects','attendance','marks','notices'].map(tab => (
           <button key={tab} style={{ ...st.tab, ...(activeTab===tab?st.activeTab:{}) }} onClick={() => { setActiveTab(tab); if (tab==='notices') fetchNotifications(); }}>
             {tab==='subjects'?'📚 My Subjects':tab==='attendance'?'📅 Attendance':tab==='marks'?'📊 Marks':'🔔 Notices'}
@@ -290,12 +290,12 @@ export default function TeacherDashboard({ teacher, onLogout }) {
 
       {msg && <div style={{ ...st.msg, background: msgType==='error'?'#fff5f5':'#f0fff4', color: msgType==='error'?'#c53030':'#276749' }}>{msg}</div>}
 
-      <div style={st.content}>
+      <div className="erp-content" style={st.content}>
 
         {/* SUBJECTS TAB */}
         {activeTab === 'subjects' && (
           <div>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.5rem' }}>
+            <div className="erp-card-header" style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'1.5rem' }}>
               <div>
                 <h2 style={{ margin:0 }}>📚 My Subject Assignments</h2>
                 <p style={{ color:'#718096', margin:'0.25rem 0 0' }}>{Object.keys(groupedSubjects).length} subjects · {subjects.length} total assignments</p>
@@ -309,12 +309,12 @@ export default function TeacherDashboard({ teacher, onLogout }) {
             {showAddForm && (
               <div style={st.addForm}>
                 <h4 style={{ margin:'0 0 1rem', color:'#2d3748' }}>➕ Add New Subject Assignment</h4>
-                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:'12px', marginBottom:'12px' }}>
+                <div className="erp-form-grid erp-form-grid-4" style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr 1fr', gap:'12px', marginBottom:'12px' }}>
                   <div>
                     <label style={st.label}>Subject *</label>
                     <select style={st.select} value={addForm.subject_id} onChange={e => setAddForm(p => ({...p, subject_id: e.target.value}))}>
                       <option value="">Select subject...</option>
-                      {allSubjects.map(s => (
+                      {subjects.map(s => (
                         <option key={s.subject_id} value={s.subject_id}>
                           {s.subject_code} — {s.subject_name.substring(0,30)}
                         </option>
@@ -347,7 +347,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
             ) : (
               Object.values(groupedSubjects).map(sub => (
                 <div key={sub.subject_id} style={st.subjectCard}>
-                  <div style={st.subjectHeader}>
+                  <div className="erp-subject-header" style={st.subjectHeader}>
                     <div>
                       <span style={st.subCode}>{sub.subject_code}</span>
                       <span style={st.subName}>{sub.subject_name}</span>
@@ -373,9 +373,9 @@ export default function TeacherDashboard({ teacher, onLogout }) {
 
         {/* ATTENDANCE TAB */}
         {activeTab === 'attendance' && (
-          <div style={st.card}>
+          <div className="erp-card" style={st.card}>
             <h3 style={st.cardTitle}>📅 Mark Attendance</h3>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr auto', gap:'12px', marginBottom:'1rem', alignItems:'end' }}>
+            <div className="erp-form-grid erp-form-grid-3" style={{ display:'grid', gridTemplateColumns:'1fr 1fr auto', gap:'12px', marginBottom:'1rem', alignItems:'end' }}>
               <div>
                 <label style={st.label}>Subject</label>
                 <select style={st.select} value={attSubject} onChange={e => setAttSubject(e.target.value)}>
@@ -392,7 +392,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
 
             {attLoading ? <p>Loading...</p> : attStudents.length > 0 && (
               <div>
-                <table style={st.table}>
+                <div className="erp-table-wrap"><table style={st.table}>
                   <thead><tr>
                     <th style={st.th}>Roll No</th><th style={st.th}>Name</th><th style={st.th}>Status</th>
                   </tr></thead>
@@ -411,7 +411,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
                       </td>
                     </tr>
                   ))}</tbody>
-                </table>
+                </table></div>
                 <div style={{ display:'flex', gap:'12px', marginTop:'1rem' }}>
                   <button style={st.saveBtn} onClick={submitAttendance}>💾 Save Attendance</button>
                   <button style={{ ...st.saveBtn, background:'#2b6cb0' }} onClick={exportAttendance}>📥 Export CSV</button>
@@ -425,9 +425,9 @@ export default function TeacherDashboard({ teacher, onLogout }) {
         {activeTab === 'marks' && (
           <div>
             {/* Enter Marks */}
-            <div style={st.card}>
+            <div className="erp-card" style={st.card}>
               <h3 style={st.cardTitle}>✏️ Enter Marks</h3>
-              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr auto', gap:'12px', marginBottom:'1rem', alignItems:'end'}}>
+              <div className="erp-form-grid erp-form-grid-3" style={{display:'grid', gridTemplateColumns:'1fr 1fr auto', gap:'12px', marginBottom:'1rem', alignItems:'end'}}>
                 <div>
                   <label style={st.label}>Subject</label>
                   <select style={st.select} value={marksSubject} onChange={e=>setMarksSubject(e.target.value)}>
@@ -466,11 +466,11 @@ export default function TeacherDashboard({ teacher, onLogout }) {
 
               {classMarks.length > 0 && (
                 <div>
-                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.75rem'}}>
+                  <div className="erp-card-header" style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'0.75rem'}}>
                     <span style={{fontSize:'0.85rem',color:'#718096',fontWeight:'600'}}>{classMarks.length} students loaded</span>
                     <button style={{...st.saveBtn,margin:0,padding:'0.5rem 1.25rem'}} onClick={submitMarks}>💾 Save All Marks</button>
                   </div>
-                  <table style={st.table}>
+                  <div className="erp-table-wrap"><table style={st.table}>
                     <thead>
                       <tr>
                         <th style={st.th}>Roll No</th>
@@ -498,13 +498,13 @@ export default function TeacherDashboard({ teacher, onLogout }) {
                               value={s.marks} placeholder="—"
                               onChange={e => { const u=[...classMarks]; u[i].marks=e.target.value; setClassMarks(u); }} />
                           </td>
-                          <td style={{...st.td, fontWeight:'600', color: pct>=60?'#276749':pct>=40?'#92400e':'#c53030'}}>
+                          <td style={{...st.td, fontWeight:'600', color: pct==='—'?'#a0aec0':pct>=60?'#276749':pct>=40?'#92400e':'#c53030'}}>
                             {pct !== '—' ? `${pct}%` : '—'}
                           </td>
                         </tr>
                       );
                     })}</tbody>
-                  </table>
+                  </table></div>
                 </div>
               )}
               {classMarks.length === 0 && marksSubject && !marksLoading && (
@@ -515,9 +515,9 @@ export default function TeacherDashboard({ teacher, onLogout }) {
             </div>
 
             {/* View Marks */}
-            <div style={st.card}>
+            <div className="erp-card" style={st.card}>
               <h3 style={st.cardTitle}>📊 View Class Marks</h3>
-              <div style={{display:'grid', gridTemplateColumns:'1fr auto', gap:'12px', marginBottom:'1rem', alignItems:'end'}}>
+              <div className="erp-form-grid erp-form-grid-2" style={{display:'grid', gridTemplateColumns:'1fr auto', gap:'12px', marginBottom:'1rem', alignItems:'end'}}>
                 <div>
                   <label style={st.label}>Subject</label>
                   <select style={st.select} value={viewMarksSubject} onChange={e=>setViewMarksSubject(e.target.value)}>
@@ -541,7 +541,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
                 const examTypes = ['INTERNAL','ASSIGNMENT','PRACTICAL_INTERNAL'];
                 const presentTypes = examTypes.filter(t => viewMarks.some(m => m.exam_type === t));
                 return (
-                  <table style={st.table}>
+                  <div className="erp-table-wrap"><table style={st.table}>
                     <thead>
                       <tr>
                         <th style={st.th}>Roll No</th>
@@ -577,7 +577,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
                         </tr>
                       );
                     })}</tbody>
-                  </table>
+                  </table></div>
                 );
               })()}
             </div>
@@ -588,7 +588,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
         {activeTab === 'notices' && (
           <div>
             {/* Send notice form */}
-            <div style={st.card}>
+            <div className="erp-card" style={st.card}>
               <h3 style={st.cardTitle}>📢 Send Notice to Students</h3>
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px', marginBottom:'0.75rem' }}>
                 <div>
@@ -678,7 +678,7 @@ export default function TeacherDashboard({ teacher, onLogout }) {
             ) : (
               notifications.map(n => (
                 <div key={n.notification_id} style={{ background:'#fff', borderRadius:'10px', boxShadow:'0 2px 8px rgba(0,0,0,0.08)', marginBottom:'1rem', overflow:'hidden' }}>
-                  <div style={{ padding:'1rem 1.25rem', borderBottom:'1px solid #e2e8f0', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
+                  <div className="erp-card-header" style={{ padding:'1rem 1.25rem', borderBottom:'1px solid #e2e8f0', display:'flex', justifyContent:'space-between', alignItems:'center' }}>
                     <div>
                       <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
                         <h4 style={{ margin:0, color:'#2d3748' }}>{n.title}</h4>

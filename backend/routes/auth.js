@@ -6,7 +6,10 @@ const jwt      = require('jsonwebtoken');
 const crypto   = require('crypto');
 const { verify }     = require('../middleware/auth');
 const blacklist      = require('../middleware/tokenBlacklist');
-require('dotenv').config();
+
+// Dummy hash used to equalise timing when user is not found.
+// Pre-computed once at startup. Value is a hash of a random string — never matches.
+const DUMMY_HASH = bcrypt.hashSync(crypto.randomBytes(16).toString('hex'), 12);
 
 // ── Student login ─────────────────────────────────────────────────────────────
 router.post('/student/login', async (req, res) => {
@@ -27,9 +30,13 @@ router.post('/student/login', async (req, res) => {
        WHERE s.roll_no = ?`,
       [roll_no]
     );
-    if (!rows.length) return res.status(401).json({ error: 'Invalid credentials' });
-    const valid = await bcrypt.compare(password, rows[0].password);
-    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+
+    // Timing-attack mitigation: always run bcrypt.compare, even when user not found.
+    const hashToCheck = rows.length ? rows[0].password : DUMMY_HASH;
+    const valid = await bcrypt.compare(password, hashToCheck);
+    if (!rows.length || !valid) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
 
     // Upgrade cost factor on successful login if still at old cost 10
     if (rows[0].password.startsWith('$2b$10$') || rows[0].password.startsWith('$2a$10$')) {
@@ -69,9 +76,20 @@ router.post('/teacher/login', async (req, res) => {
        WHERE t.email = ?`,
       [email]
     );
-    if (!rows.length) return res.status(401).json({ error: 'Invalid credentials' });
-    const valid = await bcrypt.compare(password, rows[0].password);
-    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+
+    // Timing-attack mitigation
+    const hashToCheck = rows.length ? rows[0].password : DUMMY_HASH;
+    const valid = await bcrypt.compare(password, hashToCheck);
+    if (!rows.length || !valid) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    // Upgrade cost factor on successful login if still at old cost 10
+    if (rows[0].password.startsWith('$2b$10$') || rows[0].password.startsWith('$2a$10$')) {
+      const upgraded = await bcrypt.hash(password, 12);
+      await db.query('UPDATE teachers SET password = ? WHERE teacher_id = ?',
+        [upgraded, rows[0].teacher_id]);
+    }
 
     const jti   = crypto.randomUUID();
     const token = jwt.sign(
@@ -87,7 +105,7 @@ router.post('/teacher/login', async (req, res) => {
   }
 });
 
-// ── Logout (student / teacher) — blacklists the token ────────────────────────
+// ── Logout (student / teacher / clerk / fee_clerk) — blacklists the token ────
 router.post('/logout', verify(), (req, res) => {
   const { jti, exp } = req.user;
   if (jti && exp) blacklist.add(jti, exp);

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { verify } = require('../middleware/auth');
+const { mapDeleteError } = require('../utils/safeDelete');
 
 router.use(verify());
 
@@ -43,10 +44,19 @@ router.post('/', verify('admin'), async (req, res) => {
 // Delete discipline
 router.delete('/:id', verify('admin'), async (req, res) => {
   try {
-    const [result] = await db.query('DELETE FROM disciplines WHERE discipline_id = ?', [req.params.id]);
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Discipline not found' });
+    const [result] = await db.query(
+      'DELETE FROM disciplines WHERE discipline_id = ?', [req.params.id]
+    );
+    if (result.affectedRows === 0)
+      return res.status(404).json({ error: 'Discipline not found' });
     res.json({ message: 'Discipline deleted' });
-  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+  } catch (err) {
+    console.error('DELETE /disciplines/:id error:', err);
+    // NOTE: disciplines are referenced by students, teachers, subjects.
+    // Cascading would orphan academic records, so we REFUSE the delete and
+    // tell the admin to reassign dependents first.
+    const mapped = mapDeleteError(err, 'discipline');
+    res.status(mapped.status).json(mapped.body);
+  }
 });
-
 module.exports = router;

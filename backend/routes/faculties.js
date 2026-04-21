@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { verify } = require('../middleware/auth');
+const { mapDeleteError } = require('../utils/safeDelete');
 
 router.use(verify());
 
@@ -28,10 +29,16 @@ router.post('/', verify('admin'), async (req, res) => {
 // Delete faculty
 router.delete('/:id', verify('admin'), async (req, res) => {
   try {
-    const [result] = await db.query('DELETE FROM faculties WHERE faculty_id = ?', [req.params.id]);
-    if (result.affectedRows === 0) return res.status(404).json({ error: 'Faculty not found' });
+    const [result] = await db.query(
+      'DELETE FROM faculties WHERE faculty_id = ?', [req.params.id]
+    );
+    if (result.affectedRows === 0)
+      return res.status(404).json({ error: 'Faculty not found' });
     res.json({ message: 'Faculty deleted' });
-  } catch (err) { res.status(500).json({ error: "Internal server error" }); }
+  } catch (err) {
+    console.error('DELETE /faculties/:id error:', err);
+    const mapped = mapDeleteError(err, 'faculty');
+    res.status(mapped.status).json(mapped.body);
+  }
 });
-
 module.exports = router;

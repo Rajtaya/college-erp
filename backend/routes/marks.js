@@ -128,10 +128,10 @@ router.get('/student/:student_id/summary', async (req, res) => {
       `SELECT s.subject_id, s.subject_name, s.subject_code,
               SUM(m.marks_obtained) AS total_obtained,
               SUM(m.max_marks) AS total_max,
-              ROUND(SUM(m.marks_obtained) / SUM(m.max_marks) * 100, 1) AS percentage
+              ROUND(SUM(m.marks_obtained) / NULLIF(SUM(m.max_marks), 0) * 100, 1) AS percentage
        FROM marks m
        JOIN subjects s ON m.subject_id = s.subject_id
-       WHERE m.student_id = ?
+       WHERE m.student_id = ? AND m.is_visible_to_student = 1
        GROUP BY s.subject_id`,
       [req.params.student_id]
     );
@@ -145,7 +145,7 @@ router.get('/student/:student_id/summary', async (req, res) => {
 router.get('/subject/:subject_id', verify('teacher', 'admin'), async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT m.*, CONCAT(st.first_name, ' ', st.last_name) AS name, st.roll_no
+      `SELECT m.*, TRIM(CONCAT(IFNULL(st.first_name,''), ' ', IFNULL(st.last_name,''))) AS name, st.roll_no
        FROM marks m
        JOIN students st ON m.student_id = st.student_id
        WHERE m.subject_id = ?
