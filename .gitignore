@@ -31,3 +31,7 @@ backend/uploads/*
 p.txt
 pp.txt
 ppp.txt
+
+# Backup files created during patches
+*.bak
+*.bak-*
