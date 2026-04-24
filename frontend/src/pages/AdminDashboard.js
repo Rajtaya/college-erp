@@ -320,22 +320,96 @@ export default function AdminDashboard({ admin, onLogout }) {
   // ── Enrollment Import from Excel ───────────────────────────────────
   const handleImportEnrollment = async (e) => {
     const file = e.target.files[0]; if (!file) return; setImporting(true);
+    setImportErrors([]);
     try {
       const data = await file.arrayBuffer(); const wb = XLSX.read(data);
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
-      const enrollments = rows.map(row => {
-        const subjects = [];
-        for (let i = 1; i <= 12; i++) {
-          const code = row[`DSC-${i}`];
-          if (code) subjects.push(String(code).trim());
-        }
-        return { roll_no: String(row.roll_no || ''), subjects };
-      }).filter(r => r.roll_no && r.subjects.length > 0);
 
+      // Build discipline name → ID lookup
+      const discMap = {};
+      disciplines.forEach(d => { discMap[d.discipline_name.toLowerCase()] = d.discipline_id; });
+
+      // ── PRE-FLIGHT: scan rows, collect validation warnings ──
+      const warnings = [];
+      rows.forEach((row, idx) => {
+        const rowNum = idx + 2; // +2 = 1-indexed + header row
+        const roll_no = String(row.roll_no || '').trim();
+        const name = roll_no || '(no roll_no)';
+
+        if (!roll_no) {
+          warnings.push({ row: rowNum, name, email: '', severity: 'error', reason: 'Missing roll_no' });
+        }
+
+        // Collect discipline names from discipline_1/2/3 columns
+        const discNames = [row.discipline_1, row.discipline_2, row.discipline_3].filter(Boolean);
+        if (discNames.length === 0) {
+          warnings.push({ row: rowNum, name, email: '', severity: 'error', reason: 'No disciplines provided (need at least discipline_1)' });
+        }
+        discNames.forEach((dname, i) => {
+          if (!discMap[String(dname).toLowerCase()]) {
+            warnings.push({ row: rowNum, name, email: '', severity: 'error', reason: `discipline_${i+1} "${dname}" not found in system` });
+          }
+        });
+      });
+
+      const blockingCount = warnings.filter(w => w.severity === 'error').length;
+      const warningCount = warnings.filter(w => w.severity === 'warning').length;
+      if (warnings.length > 0) {
+        const proceed = window.confirm(
+          `Pre-flight check found ${blockingCount} error(s) and ${warningCount} warning(s) across ${rows.length} rows.\n\n` +
+          `Rows with errors will be skipped.\n\n` +
+          `Click OK to proceed (failures will be reported after).\n` +
+          `Click Cancel to abort and fix the file first.`
+        );
+        if (!proceed) {
+          setImportErrors(warnings);
+          setImportErrorsOpen(true);
+          setImporting(false);
+          e.target.value = '';
+          return;
+        }
+      }
+
+      // ── BUILD PAYLOAD: resolve discipline names → IDs per row ──
+      const enrollments = rows.map(row => {
+        const roll_no = String(row.roll_no || '').trim();
+        const discNames = [row.discipline_1, row.discipline_2, row.discipline_3].filter(Boolean);
+        const discipline_ids = discNames
+          .map(n => discMap[String(n).toLowerCase()])
+          .filter(Boolean);
+        return { roll_no, discipline_ids };
+      }).filter(r => r.roll_no && r.discipline_ids.length > 0);
+
+      if (enrollments.length === 0) {
+        showMsg('No valid rows to import', 'error');
+        setImporting(false);
+        e.target.value = '';
+        return;
+      }
+
+      // ── SEND: backend handles per-row transactions + MAJOR auto-enrollment ──
       const res = await API.post('/enrollment/bulk-import', { enrollments });
-      const { success, failed, errors } = res.data;
-      if (errors?.length) console.warn('Enrollment import errors:', errors);
-      showMsg(`✅ Enrolled ${success} subjects${failed ? `, ❌ ${failed} students failed` : ''}`, failed ? 'warning' : 'success');
+      const { success, failed, disciplines_assigned, majors_assigned, locked_skipped, errors } = res.data;
+
+      // Show summary toast with new response fields
+      const parts = [`✅ ${success} students`];
+      if (disciplines_assigned) parts.push(`${disciplines_assigned} disciplines`);
+      if (majors_assigned)      parts.push(`${majors_assigned} MAJORs enrolled`);
+      if (locked_skipped)       parts.push(`${locked_skipped} locked (skipped)`);
+      if (failed)               parts.push(`❌ ${failed} failed`);
+      showMsg(parts.join(' · '), failed ? 'warning' : 'success');
+
+      // Merge server errors with pre-flight warnings into the errors modal
+      const serverErrors = (errors || []).map(err => ({
+        row: '—', name: err.roll_no || '(unknown)', email: '',
+        severity: 'error', reason: err.error || 'Unknown error'
+      }));
+      const allIssues = [...serverErrors, ...warnings.filter(w => w.severity === 'warning')];
+      if (allIssues.length > 0) {
+        setImportErrors(allIssues);
+        setImportErrorsOpen(true);
+      }
+
       fetchEnrollmentSummary();
     } catch (err) {
       console.error('[Import] Enrollment failed:', err);
@@ -343,7 +417,7 @@ export default function AdminDashboard({ admin, onLogout }) {
     } finally {
       setImporting(false); e.target.value = '';
     }
-  };
+  }; 
 
   // ── Enrollment Export: Summary (uses enrollmentSummary state) ──────
   const exportEnrollmentSummary = () => {
