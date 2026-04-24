@@ -1280,14 +1280,18 @@ export default function AdminDashboard({ admin, onLogout }) {
 
   const downloadTemplate = (type) => {
     const templates = {
-      students: [{ roll_no:'BA001', name:'Priya Sharma', email:'priya@college.com', phone:'9876543211', level_name:'UG', faculty_name:'Arts', programme_name:'B.A', semester:1, year:1, password:'password123', discipline_1:'Economics', discipline_2:'History', discipline_3:'English' }],
+students: [{ roll_no:'BA001', name:'Priya Sharma', email:'priya@college.com', phone:'9876543211', level_name:'UG', faculty_name:'Arts', programme_name:'B.A', semester:1, year:1, academic_year_id:2, password:'password123', discipline_1:'Economics', discipline_2:'History', discipline_3:'English' }],
       teachers: [
         { title:'Dr',   first_name:'Priya',  last_name:'Sharma', email:'priya.sharma@college.com',  phone:'9876543211', designation:'Assistant Professor', employee_code:'EMP001', password:'teacher123', discipline_1:'Economics',       discipline_2:'',        discipline_3:'', department_1:'Department of Economics',  department_2:'' },
         { title:'Prof', first_name:'Ramesh', last_name:'Verma',  email:'ramesh.verma@college.com',  phone:'9876543212', designation:'Professor',           employee_code:'EMP002', password:'teacher123', discipline_1:'Botany',          discipline_2:'Zoology', discipline_3:'', department_1:'Department of Botany',     department_2:'Department of Zoology' },
         { title:'Ms',   first_name:'Anjali', last_name:'Gupta',  email:'anjali.gupta@college.com',  phone:'9876543213', designation:'Associate Professor', employee_code:'EMP003', password:'teacher123', discipline_1:'Computer Science', discipline_2:'',        discipline_3:'', department_1:'Department of Computer Science', department_2:'' },
       ],
-      fees: [{ roll_no:'BCA001', amount:15000, fee_type:'Tuition Fee', due_date:'2026-04-01' }],
-    };
+fees: [{ roll_no:'BCA001', amount:15000, fee_type:'Tuition Fee', due_date:'2026-04-01' }],
+      enrollment: [
+        { roll_no:'BCAAI101', discipline_1:'Computer Applications (BCA-AI)', discipline_2:'', discipline_3:'' },
+        { roll_no:'BCA101',   discipline_1:'Computer Applications (BCA)',    discipline_2:'', discipline_3:'' },
+        { roll_no:'BA101',    discipline_1:'Economics',                      discipline_2:'History', discipline_3:'English' },
+      ],    };
 
     const wb = XLSX.utils.book_new();
     const ws = XLSX.utils.json_to_sheet(templates[type]);
@@ -2106,6 +2110,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                     <h3 style={{margin:0}}>📋 Enrollment Management
                       <span style={{fontSize:'0.85rem',color:'#718096',fontWeight:'400',marginLeft:'0.75rem'}}>({enrollmentSummary.length} students)</span>
                     </h3>
+                    <button style={{...styles.templateBtn,whiteSpace:'nowrap'}} onClick={()=>downloadTemplate('enrollment')}>⬇️ Download Template</button>
                     <label style={{...styles.templateBtn,whiteSpace:'nowrap',background:'#2b6cb0',color:'#fff',cursor:'pointer',margin:0}}>📤 Import Enrollment <input type="file" accept=".xlsx,.xls" hidden onChange={handleImportEnrollment}/></label>
                   </div>
                   {/* Filters */}
