@@ -84,6 +84,31 @@ router.post('/bulk', verify('admin'), async (req, res) => {
     return res.status(400).json({ error: 'No students provided' });
   }
 
+  // Compulsory: every row must have academic_year_id
+  const missingYear = students
+    .map((s, i) => ({ idx: i, roll_no: s.roll_no, ay: s.academic_year_id }))
+    .filter(r => !r.ay || !Number.isInteger(Number(r.ay)));
+  if (missingYear.length > 0) {
+    return res.status(400).json({
+      error: `${missingYear.length} row(s) missing or invalid academic_year_id. Every student must specify the academic year.`,
+      first_failing_roll_nos: missingYear.slice(0, 5).map(r => r.roll_no)
+    });
+  }
+
+  // Validate all referenced academic_year_ids actually exist
+  const yearIds = [...new Set(students.map(s => Number(s.academic_year_id)))];
+  const [validYears] = await db.query(
+    'SELECT academic_year_id FROM academic_years WHERE academic_year_id IN (?)',
+    [yearIds]
+  );
+  const validSet = new Set(validYears.map(r => r.academic_year_id));
+  const bogus = yearIds.filter(y => !validSet.has(y));
+  if (bogus.length > 0) {
+    return res.status(400).json({
+      error: `Unknown academic_year_id value(s): ${bogus.join(', ')}. Check the academic_years table for valid IDs.`
+    });
+  }
+
   // Hash ALL passwords in parallel (fast)
   const prepared = await Promise.all(students.map(async (s) => {
     const namePart = (s.first_name || s.name || 'user').replace(/\s/g, '').toLowerCase().slice(0, 4);
@@ -152,10 +177,20 @@ router.post('/', verify('admin'), async (req, res) => {
   } = req.body;
 
   // Basic validation
-  if (!roll_no || !first_name || !password || !programme_id || !level_id || !semester) {
+// Basic validation
+  if (!roll_no || !first_name || !password || !programme_id || !level_id || !semester || !academic_year_id) {
     return res.status(400).json({
-      error: 'Missing required fields: roll_no, first_name, password, programme_id, level_id, semester'
+      error: 'Missing required fields: roll_no, first_name, password, programme_id, level_id, semester, academic_year_id'
     });
+  }
+
+  // Validate academic_year_id exists
+  const [ayRows] = await db.query(
+    'SELECT academic_year_id FROM academic_years WHERE academic_year_id = ?',
+    [academic_year_id]
+  );
+  if (!ayRows.length) {
+    return res.status(400).json({ error: `Unknown academic_year_id: ${academic_year_id}` });
   }
 
   const discIds = Array.isArray(discipline_ids)
