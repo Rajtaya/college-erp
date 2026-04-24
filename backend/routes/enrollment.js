@@ -664,53 +664,142 @@ router.post('/bulk-import', verify('admin'), async (req, res) => {
     return res.status(400).json({ error: 'No enrollment data provided' });
   }
 
+  // Resolve current academic year once (reused across all rows)
+  const [ayRows] = await db.query(
+    'SELECT academic_year_id FROM academic_years WHERE is_current = 1 LIMIT 1'
+  );
+  const academic_year_id = ayRows.length ? ayRows[0].academic_year_id : null;
+
   let success = 0, failed = 0;
+  let disciplines_assigned = 0;
+  let majors_assigned      = 0;
+  let locked_skipped       = 0;
   const errors = [];
 
   for (const row of enrollments) {
-    const { roll_no, subjects } = row;
-    if (!roll_no || !subjects || !subjects.length) { failed++; continue; }
+    const { roll_no, discipline_ids } = row;
 
-    // Find student
-    const [stuRows] = await db.query('SELECT student_id, programme_id, semester FROM students WHERE roll_no = ?', [roll_no]);
-    if (!stuRows.length) { failed++; errors.push({ roll_no, error: 'Student not found' }); continue; }
-    const student = stuRows[0];
+    // --- per-row validation (before opening txn) ---
+    if (!roll_no) {
+      failed++; errors.push({ roll_no: roll_no || '(blank)', error: 'Missing roll_no' });
+      continue;
+    }
+    const discIds = Array.isArray(discipline_ids)
+      ? [...new Set(discipline_ids.map(Number).filter(n => Number.isInteger(n) && n > 0))]
+      : [];
+    if (discIds.length === 0) {
+      failed++; errors.push({ roll_no, error: 'No disciplines provided' });
+      continue;
+    }
 
-    // Get current academic year
-    const [ayRows] = await db.query('SELECT academic_year_id FROM academic_years WHERE is_current = 1 LIMIT 1');
-    const academic_year_id = ayRows.length ? ayRows[0].academic_year_id : null;
+    const conn = await db.getConnection();
+    try {
+      await conn.beginTransaction();
 
-    for (const subject_code of subjects) {
-      if (!subject_code) continue;
-      // Find subject in programme_subject_pool
-      const [subRows] = await db.query(
-        `SELECT psp.subject_id FROM programme_subject_pool psp
-         JOIN subjects s ON psp.subject_id = s.subject_id
-         WHERE s.subject_code = ? AND psp.programme_id = ?`,
-        [subject_code, student.programme_id]
+      // 1. Find student
+      const [stuRows] = await conn.query(
+        `SELECT student_id, programme_id, level_id, semester
+         FROM students WHERE roll_no = ?`,
+        [roll_no]
       );
-      if (!subRows.length) {
-        // Try without programme filter
-        const [subRows2] = await db.query('SELECT subject_id FROM subjects WHERE subject_code = ?', [subject_code]);
-        if (!subRows2.length) { errors.push({ roll_no, error: `Subject not found: ${subject_code}` }); continue; }
-        var subject_id = subRows2[0].subject_id;
-      } else {
-        var subject_id = subRows[0].subject_id;
+      if (!stuRows.length) {
+        throw new Error('Student not found');
+      }
+      const student = stuRows[0];
+
+      if (!student.programme_id || !student.level_id || !student.semester) {
+        throw new Error('Student missing programme/level/semester');
       }
 
-      try {
-        await db.query(
-          `INSERT INTO student_subject_enrollment (student_id, subject_id, semester, academic_year_id, status, is_draft)
-           VALUES (?, ?, ?, ?, 'DRAFT', 1)
-           ON DUPLICATE KEY UPDATE status = 'DRAFT', is_draft = 1`,
+      // 2. Validate disciplines are valid MAJOR disciplines for this programme+sem+level.
+      const [validDiscRows] = await conn.query(
+        `SELECT DISTINCT s.discipline_id
+         FROM programme_subject_pool psp
+         JOIN subjects s ON psp.subject_id = s.subject_id
+         WHERE psp.programme_id = ?
+           AND s.category       = 'MAJOR'
+           AND s.semester       = ?
+           AND s.level_id       = ?
+           AND s.discipline_id IN (?)`,
+        [student.programme_id, student.semester, student.level_id, discIds]
+      );
+      const validDiscSet = new Set(validDiscRows.map(r => r.discipline_id));
+      const invalid = discIds.filter(d => !validDiscSet.has(d));
+      if (invalid.length > 0) {
+        throw new Error(
+          `Discipline(s) not valid for this student's programme/sem/level: ` +
+          `[${invalid.join(', ')}]`
+        );
+      }
+
+      // 3. Insert disciplines (idempotent — INSERT IGNORE)
+      const dPlaceholders = discIds.map(() => '(?,?)').join(',');
+      const dValues       = discIds.flatMap(did => [student.student_id, did]);
+      const [dResult] = await conn.query(
+        `INSERT IGNORE INTO student_disciplines (student_id, discipline_id)
+         VALUES ${dPlaceholders}`,
+        dValues
+      );
+      disciplines_assigned += dResult.affectedRows;
+
+      // 4. Auto-enroll MAJOR subjects — per-subject, respecting admin_modified lock
+      const [majorSubjects] = await conn.query(
+        `SELECT s.subject_id
+         FROM subjects s
+         WHERE s.category     = 'MAJOR'
+           AND s.semester     = ?
+           AND s.level_id     = ?
+           AND s.discipline_id IN (?)`,
+        [student.semester, student.level_id, discIds]
+      );
+
+      for (const { subject_id } of majorSubjects) {
+        const [existing] = await conn.query(
+          `SELECT admin_modified FROM student_subject_enrollment
+           WHERE student_id = ? AND subject_id = ?`,
+          [student.student_id, subject_id]
+        );
+        if (existing.length && existing[0].admin_modified === 1) {
+          locked_skipped++;
+          continue;
+        }
+
+        const [mResult] = await conn.query(
+          `INSERT INTO student_subject_enrollment
+             (student_id, subject_id, status, is_major, is_draft,
+              admin_modified, semester, academic_year_id)
+           VALUES (?, ?, 'ACCEPTED', 1, 0, 1, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             status         = 'ACCEPTED',
+             is_major       = 1,
+             is_draft       = 0,
+             admin_modified = 1,
+             semester       = VALUES(semester),
+             academic_year_id = VALUES(academic_year_id)`,
           [student.student_id, subject_id, student.semester, academic_year_id]
         );
-        success++;
-      } catch (e) { errors.push({ roll_no, error: `${subject_code}: ${e.message}` }); }
+        if (mResult.affectedRows > 0) majors_assigned++;
+      }
+
+      await conn.commit();
+      success++;
+    } catch (err) {
+      await conn.rollback();
+      failed++;
+      errors.push({ roll_no, error: err.message });
+    } finally {
+      conn.release();
     }
   }
 
-  res.json({ success, failed, errors: errors.slice(0, 30) });
+  res.json({
+    success,
+    failed,
+    disciplines_assigned,
+    majors_assigned,
+    locked_skipped,
+    errors: errors.slice(0, 30)
+  });
 });
 
 module.exports = router;
