@@ -293,3 +293,27 @@
     font-size: 1.3rem !important;
   }
 }
+
+/* Programmes vertical scroll + sticky header */
+.erp-programmes-scroll {
+  max-height: 520px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+.erp-programmes-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #2d3748;
+}
+
+/* Fix sticky header — override .erp-table display:block */
+.erp-programmes-scroll table {
+  display: table !important;
+  width: 100% !important;
+}
+.erp-programmes-scroll thead {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}

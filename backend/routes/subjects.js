@@ -46,11 +46,17 @@ router.post('/', verify('admin'), async (req, res) => {
 // GET /teacher/:teacher_id — all assignments for a teacher (with section + programme info)
 router.get('/teacher/:teacher_id', async (req, res) => {
   try {
+    const { academic_year_id, semester } = req.query;
+    let where = 'WHERE st.teacher_id = ?';
+    const params = [req.params.teacher_id];
+    if (academic_year_id) { where += ' AND st.academic_year_id = ?'; params.push(academic_year_id); }
+    if (semester)         { where += ' AND st.semester = ?';         params.push(semester); }
     const [rows] = await db.query(
-      `SELECT s.subject_id, s.subject_code, s.subject_name, s.category, s.semester, 
+      `SELECT s.subject_id, s.subject_code, s.subject_name, s.category, s.semester,
               s.credits, s.internal_marks, s.level_id, s.faculty_id, s.discipline_id, s.is_common,
               l.level_name, f.faculty_name, d.discipline_name,
               st.id as assignment_id, st.section, st.programme_id, st.class_name,
+              st.academic_year_id, st.semester as assigned_semester,
               p.programme_name
        FROM subject_teachers st
        JOIN subjects s ON st.subject_id = s.subject_id
@@ -58,9 +64,9 @@ router.get('/teacher/:teacher_id', async (req, res) => {
        LEFT JOIN programmes p ON st.programme_id = p.programme_id
        LEFT JOIN faculties f ON s.faculty_id = f.faculty_id
        LEFT JOIN disciplines d ON s.discipline_id = d.discipline_id
-       WHERE st.teacher_id = ?
+       ${where}
        ORDER BY s.semester, s.subject_code, st.section`,
-      [req.params.teacher_id]
+      params
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
@@ -69,16 +75,24 @@ router.get('/teacher/:teacher_id', async (req, res) => {
 // GET /all-teachers — all subject-teacher assignments in one query
 router.get('/all-teachers', async (req, res) => {
   try {
+    const { academic_year_id, semester } = req.query;
+    const where = [];
+    const params = [];
+    if (academic_year_id) { where.push('st.academic_year_id = ?'); params.push(academic_year_id); }
+    if (semester)         { where.push('st.semester = ?');         params.push(semester); }
+    const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : '';
     const [rows] = await db.query(
       `SELECT st.subject_id, t.teacher_id, CONCAT(t.first_name, ' ', t.last_name) AS name, t.email,
               st.id as assignment_id, st.section, st.programme_id, st.class_name,
+              st.academic_year_id, st.semester as assigned_semester,
               p.programme_name
        FROM subject_teachers st
        JOIN teachers t ON st.teacher_id = t.teacher_id
        LEFT JOIN programmes p ON st.programme_id = p.programme_id
-       ORDER BY st.subject_id, t.first_name, st.section`
+       ${whereClause}
+       ORDER BY st.subject_id, t.first_name, st.section`,
+      params
     );
-    // Group by subject_id
     const grouped = {};
     rows.forEach(r => {
       if (!grouped[r.subject_id]) grouped[r.subject_id] = [];
@@ -91,16 +105,22 @@ router.get('/all-teachers', async (req, res) => {
 // GET /:subject_id/teachers — all teachers for a subject with their sections
 router.get('/:subject_id/teachers', async (req, res) => {
   try {
+    const { academic_year_id, semester } = req.query;
+    let where = 'WHERE st.subject_id = ?';
+    const params = [req.params.subject_id];
+    if (academic_year_id) { where += ' AND st.academic_year_id = ?'; params.push(academic_year_id); }
+    if (semester)         { where += ' AND st.semester = ?';         params.push(semester); }
     const [rows] = await db.query(
       `SELECT t.teacher_id, CONCAT(t.first_name, ' ', t.last_name) AS name, t.email,
               st.id as assignment_id, st.section, st.programme_id, st.class_name,
+              st.academic_year_id, st.semester as assigned_semester,
               p.programme_name
        FROM subject_teachers st
        JOIN teachers t ON st.teacher_id = t.teacher_id
        LEFT JOIN programmes p ON st.programme_id = p.programme_id
-       WHERE st.subject_id = ?
+       ${where}
        ORDER BY t.first_name, st.section`,
-      [req.params.subject_id]
+      params
     );
     res.json(rows);
   } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
@@ -108,13 +128,20 @@ router.get('/:subject_id/teachers', async (req, res) => {
 
 // POST /:subject_id/teachers — assign teacher to subject with section + programme
 router.post('/:subject_id/teachers', verify('teacher', 'admin'), async (req, res) => {
-  const { teacher_id, section = 'A', programme_id = null, class_name = null } = req.body;
+  const {
+    teacher_id,
+    section = 'A',
+    programme_id = null,
+    class_name = null,
+    academic_year_id = null,
+    semester = null
+  } = req.body;
   try {
     await db.query(
-      `INSERT INTO subject_teachers (subject_id, teacher_id, section, programme_id, class_name) 
-       VALUES (?,?,?,?,?) 
+      `INSERT INTO subject_teachers (subject_id, teacher_id, section, programme_id, class_name, academic_year_id, semester)
+       VALUES (?,?,?,?,?,?,?)
        ON DUPLICATE KEY UPDATE class_name=VALUES(class_name)`,
-      [req.params.subject_id, teacher_id, section, programme_id, class_name]
+      [req.params.subject_id, teacher_id, section, programme_id, class_name, academic_year_id, semester]
     );
     res.json({ message: 'Teacher assigned to section' });
   } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
@@ -122,12 +149,19 @@ router.post('/:subject_id/teachers', verify('teacher', 'admin'), async (req, res
 
 // PUT /assignments/:assignment_id — edit an existing subject-teacher assignment
 router.put('/assignments/:assignment_id', verify('teacher', 'admin'), async (req, res) => {
-  const { section, programme_id, class_name } = req.body;
+  const { section, programme_id, class_name, academic_year_id, semester } = req.body;
   try {
-    await db.query(
-      'UPDATE subject_teachers SET section = ?, programme_id = ?, class_name = ? WHERE id = ?',
-      [section || 'A', programme_id || null, class_name || null, req.params.assignment_id]
-    );
+    // Build dynamic SET clause — only update fields that were explicitly provided
+    const updates = [];
+    const values = [];
+    if (section !== undefined)          { updates.push('section = ?');          values.push(section || 'A'); }
+    if (programme_id !== undefined)     { updates.push('programme_id = ?');     values.push(programme_id || null); }
+    if (class_name !== undefined)       { updates.push('class_name = ?');       values.push(class_name || null); }
+    if (academic_year_id !== undefined) { updates.push('academic_year_id = ?'); values.push(academic_year_id || null); }
+    if (semester !== undefined)         { updates.push('semester = ?');         values.push(semester || null); }
+    if (updates.length === 0) return res.json({ message: 'Nothing to update' });
+    values.push(req.params.assignment_id);
+    await db.query(`UPDATE subject_teachers SET ${updates.join(', ')} WHERE id = ?`, values);
     res.json({ message: 'Assignment updated' });
   } catch (err) { res.status(500).json({ error: 'Internal server error' }); }
 });

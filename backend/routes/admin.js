@@ -155,6 +155,18 @@ router.get('/teachers', async (req, res) => {
 
 router.post('/teachers', async (req, res) => {
   const { title, first_name, last_name, email, phone, designation, employee_code, password, discipline_ids, department_ids } = req.body;
+
+  // Pre-validate required fields — cheaper than hitting DB
+  if (!first_name || !String(first_name).trim()) {
+    return res.status(400).json({ error: 'Required field missing: first_name' });
+  }
+  if (!email || !String(email).trim()) {
+    return res.status(400).json({ error: 'Required field missing: email' });
+  }
+  if (!password) {
+    return res.status(400).json({ error: 'Required field missing: password' });
+  }
+
   try {
     const hashed = await bcrypt.hash(password, 12);
     const [result] = await db.query(
@@ -174,7 +186,23 @@ router.post('/teachers', async (req, res) => {
       }
     }
     res.json({ message: 'Teacher added', teacher_id });
-  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+  } catch (err) {
+    console.error('POST /admin/teachers error:', err.code, err.sqlMessage || err.message);
+    // Map common MySQL errors to user-friendly messages
+    if (err.code === 'ER_DUP_ENTRY') {
+      const msg = err.sqlMessage || '';
+      if (/email/i.test(msg))          return res.status(409).json({ error: `Email '${email}' already exists` });
+      if (/employee_code/i.test(msg))  return res.status(409).json({ error: `Employee code '${employee_code}' already exists` });
+      return res.status(409).json({ error: 'Duplicate entry: ' + msg });
+    }
+    if (err.code === 'ER_NO_REFERENCED_ROW_2' || err.code === 'ER_NO_REFERENCED_ROW') {
+      return res.status(400).json({ error: 'Invalid discipline or department reference' });
+    }
+    if (err.code === 'ER_DATA_TOO_LONG') {
+      return res.status(400).json({ error: `Field too long: ${err.sqlMessage}` });
+    }
+    res.status(500).json({ error: 'Internal server error: ' + (err.code || err.message) });
+  }
 });
 
 router.put('/teachers/:id', async (req, res) => {

@@ -38,6 +38,8 @@ export default function AdminDashboard({ admin, onLogout }) {
   const [assignmentData, setAssignmentData] = useState([]);
   const [editingAssignment, setEditingAssignment] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [importErrors, setImportErrors] = useState([]);
+  const [importErrorsOpen, setImportErrorsOpen] = useState(false);
   const [stuFilterProg, setStuFilterProg] = useState('');
   const [stuFilterSem, setStuFilterSem] = useState('');
   const [stuFilterFaculty, setStuFilterFaculty] = useState('');
@@ -1205,12 +1207,60 @@ export default function AdminDashboard({ admin, onLogout }) {
   const downloadTemplate = (type) => {
     const templates = {
       students: [{ roll_no:'BA001', name:'Priya Sharma', email:'priya@college.com', phone:'9876543211', level_name:'UG', faculty_name:'Arts', programme_name:'B.A', semester:1, year:1, password:'password123', discipline_1:'Economics', discipline_2:'History', discipline_3:'English' }],
-      teachers: [{ title:'Dr', first_name:'Sharma', last_name:'Ji', email:'sharma@college.com', phone:'9876543211', designation:'Assistant Professor', employee_code:'EMP001', password:'teacher123', discipline_1:'Economics', discipline_2:'', discipline_3:'', department_1:'Economics Department', department_2:'' }],
+      teachers: [
+        { title:'Dr',   first_name:'Priya',  last_name:'Sharma', email:'priya.sharma@college.com',  phone:'9876543211', designation:'Assistant Professor', employee_code:'EMP001', password:'teacher123', discipline_1:'Economics',       discipline_2:'',        discipline_3:'', department_1:'Department of Economics',  department_2:'' },
+        { title:'Prof', first_name:'Ramesh', last_name:'Verma',  email:'ramesh.verma@college.com',  phone:'9876543212', designation:'Professor',           employee_code:'EMP002', password:'teacher123', discipline_1:'Botany',          discipline_2:'Zoology', discipline_3:'', department_1:'Department of Botany',     department_2:'Department of Zoology' },
+        { title:'Ms',   first_name:'Anjali', last_name:'Gupta',  email:'anjali.gupta@college.com',  phone:'9876543213', designation:'Associate Professor', employee_code:'EMP003', password:'teacher123', discipline_1:'Computer Science', discipline_2:'',        discipline_3:'', department_1:'Department of Computer Science', department_2:'' },
+      ],
       fees: [{ roll_no:'BCA001', amount:15000, fee_type:'Tuition Fee', due_date:'2026-04-01' }],
     };
-    const ws = XLSX.utils.json_to_sheet(templates[type]);
+
     const wb = XLSX.utils.book_new();
+    const ws = XLSX.utils.json_to_sheet(templates[type]);
     XLSX.utils.book_append_sheet(wb, ws, type);
+
+    // For the teachers template, attach extra help sheets so users don't mistype discipline/department names
+    if (type === 'teachers') {
+      // Sheet 2: Instructions
+      const instructions = [
+        { Column:'title',          Required:'No',  Notes:'Honorific. Examples: Dr, Prof, Mr, Ms' },
+        { Column:'first_name',     Required:'Yes', Notes:'Given name' },
+        { Column:'last_name',      Required:'No',  Notes:'Surname. Blank is OK' },
+        { Column:'email',          Required:'Yes', Notes:'Must be UNIQUE across all teachers. Used as login ID' },
+        { Column:'phone',          Required:'No',  Notes:'10-digit mobile number. No +91 prefix' },
+        { Column:'designation',    Required:'No',  Notes:'Assistant Professor / Associate Professor / Professor / Guest Faculty' },
+        { Column:'employee_code',  Required:'No',  Notes:'Unique internal code (e.g. EMP001). Blank is OK' },
+        { Column:'password',       Required:'No',  Notes:'If blank, defaults to "teacher123". Teacher should change on first login' },
+        { Column:'discipline_1',   Required:'Yes', Notes:'Teacher\'s primary discipline. MUST EXACTLY match a name from the ValidValues sheet (case insensitive). If no match, the import silently drops it and the teacher will have no discipline assigned' },
+        { Column:'discipline_2',   Required:'No',  Notes:'Secondary discipline if the teacher holds multiple. Same matching rule as above' },
+        { Column:'discipline_3',   Required:'No',  Notes:'Third discipline if applicable' },
+        { Column:'department_1',   Required:'Yes', Notes:'Primary department. MUST EXACTLY match a name from the ValidValues sheet. Format is "Department of X", not "X Department"' },
+        { Column:'department_2',   Required:'No',  Notes:'Secondary department if teacher belongs to multiple' },
+        { Column:'',               Required:'',    Notes:'' },
+        { Column:'COMMON MISTAKES', Required:'', Notes:'' },
+        { Column:'Typos in discipline/department name', Required:'', Notes:'Silent drop — teacher imported but discipline/department not linked. Use copy-paste from ValidValues sheet' },
+        { Column:'Duplicate email', Required:'', Notes:'Row fails. Check existing teachers in Admin > Teachers tab before adding' },
+        { Column:'"Economics Department" instead of "Department of Economics"', Required:'', Notes:'Silent drop. Department names always start with "Department of"' },
+        { Column:'Extra spaces in names', Required:'', Notes:'Trimmed automatically, but avoid to be safe' },
+      ];
+      const wsInstructions = XLSX.utils.json_to_sheet(instructions);
+      XLSX.utils.book_append_sheet(wb, wsInstructions, 'Instructions');
+
+      // Sheet 3: ValidValues — exact discipline and department names for copy-paste
+      const validValues = [];
+      const maxLen = Math.max(disciplines.length, departments.length);
+      for (let i = 0; i < maxLen; i++) {
+        validValues.push({
+          'Discipline Name (copy for discipline_1/2/3)': disciplines[i]?.discipline_name || '',
+          'Discipline ID (for reference)':                disciplines[i]?.discipline_id   || '',
+          'Department Name (copy for department_1/2)':   departments[i]?.department_name  || '',
+          'Department ID (for reference)':                departments[i]?.department_id    || '',
+        });
+      }
+      const wsValidValues = XLSX.utils.json_to_sheet(validValues);
+      XLSX.utils.book_append_sheet(wb, wsValidValues, 'ValidValues');
+    }
+
     XLSX.writeFile(wb, `${type}_template.xlsx`);
   };
 
@@ -1247,19 +1297,64 @@ export default function AdminDashboard({ admin, onLogout }) {
   };
   const handleImportTeachers = async (e) => {
     const file = e.target.files[0]; if (!file) return; setImporting(true);
+    setImportErrors([]);
     try {
       const data = await file.arrayBuffer(); const wb = XLSX.read(data);
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
       // Build lookup maps for discipline and department names → IDs
       const discMap = {}; disciplines.forEach(d => { discMap[d.discipline_name.toLowerCase()] = d.discipline_id; });
       const deptMap = {}; departments.forEach(d => { deptMap[d.department_name.toLowerCase()] = d.department_id; });
+
+      // ── PRE-FLIGHT: scan all rows, collect validation warnings before hitting server ──
+      const warnings = [];
+      rows.forEach((row, idx) => {
+        const rowNum = idx + 2; // +2 = 1-indexed + header row
+        const name = `${String(row.first_name||'').trim()} ${String(row.last_name||'').trim()}`.trim() || '(no name)';
+        if (!String(row.first_name||'').trim()) warnings.push({ row: rowNum, name, email: row.email||'', severity: 'error', reason: 'Missing first_name' });
+        if (!String(row.email||'').trim())      warnings.push({ row: rowNum, name, email: row.email||'', severity: 'error', reason: 'Missing email' });
+
+        // Check discipline matches
+        [row.discipline_1, row.discipline_2, row.discipline_3].forEach((dname, i) => {
+          if (dname && !discMap[String(dname).toLowerCase()]) {
+            warnings.push({ row: rowNum, name, email: row.email||'', severity: 'warning', reason: `discipline_${i+1} "${dname}" not found — will be silently dropped` });
+          }
+        });
+        // Check department matches
+        [row.department_1, row.department_2].forEach((dname, i) => {
+          if (dname && !deptMap[String(dname).toLowerCase()]) {
+            warnings.push({ row: rowNum, name, email: row.email||'', severity: 'warning', reason: `department_${i+1} "${dname}" not found — will be silently dropped` });
+          }
+        });
+      });
+
+      // If pre-flight has blocking errors OR warnings, confirm before proceeding
+      const blockingCount = warnings.filter(w => w.severity === 'error').length;
+      const warningCount = warnings.filter(w => w.severity === 'warning').length;
+      if (warnings.length > 0) {
+        const proceed = window.confirm(
+          `Pre-flight check found ${blockingCount} error(s) and ${warningCount} warning(s) across ${rows.length} rows.\n\n` +
+          `Errors will cause rows to fail. Warnings will import but with missing links.\n\n` +
+          `Click OK to proceed with import (bad rows will be reported after).\n` +
+          `Click Cancel to abort and fix the file first.`
+        );
+        if (!proceed) {
+          setImportErrors(warnings);
+          setImportErrorsOpen(true);
+          setImporting(false);
+          e.target.value = '';
+          return;
+        }
+      }
+
+      // ── IMPORT: per-row with error tracking ──
+      const errors = [];
       let success = 0, failed = 0;
-      for (const row of rows) {
+      for (const [idx, row] of rows.entries()) {
+        const rowNum = idx + 2;
+        const name = `${String(row.first_name||'').trim()} ${String(row.last_name||'').trim()}`.trim() || '(no name)';
         try {
-          // Resolve discipline names from columns discipline_1, discipline_2, discipline_3
           const discNames = [row.discipline_1, row.discipline_2, row.discipline_3].filter(Boolean);
           const discipline_ids = discNames.map(n => discMap[String(n).toLowerCase()]).filter(Boolean);
-          // Resolve department names from column department_1, department_2
           const deptNames = [row.department_1, row.department_2].filter(Boolean);
           const department_ids = deptNames.map(n => deptMap[String(n).toLowerCase()]).filter(Boolean);
           await API.post('/admin/teachers', {
@@ -1275,11 +1370,39 @@ export default function AdminDashboard({ admin, onLogout }) {
             department_ids: department_ids.length > 0 ? department_ids : undefined,
           });
           success++;
-        } catch { failed++; }
+        } catch (err) {
+          failed++;
+          errors.push({
+            row: rowNum, name, email: row.email || '',
+            severity: 'error',
+            reason: err.response?.data?.error || err.message || 'Unknown error'
+          });
+        }
       }
-      showMsg(`✅ Imported ${success}${failed?`, ❌ ${failed} failed`:''}`, failed?'warning':'success');
+      // Show summary toast
+      showMsg(`✅ Imported ${success}${failed?`, ❌ ${failed} failed (click to see details)`:''}`, failed?'warning':'success');
+      // Open modal with both pre-flight warnings (informational) + actual failures
+      const allIssues = [...errors, ...warnings.filter(w => w.severity === 'warning')];
+      if (allIssues.length > 0) {
+        setImportErrors(allIssues);
+        setImportErrorsOpen(true);
+      }
       fetchTeachers();
-    } catch { showMsg('Failed!','error'); } finally { setImporting(false); e.target.value=''; }
+    } catch (err) { showMsg('Import failed: ' + (err.message || 'Unknown error'), 'error'); }
+    finally { setImporting(false); e.target.value=''; }
+  };
+
+  // Export failed rows as CSV for easy re-upload after fixing
+  const downloadImportErrorsCSV = () => {
+    const csv = [
+      'Row,Name,Email,Severity,Reason',
+      ...importErrors.map(e => `${e.row},"${e.name}","${e.email}",${e.severity},"${String(e.reason).replace(/"/g,'""')}"`)
+    ].join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'import_errors.csv'; a.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleImportFees = async (e) => {
@@ -1341,6 +1464,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                 <input style={styles.input} placeholder="Description" value={form.description||''} onChange={e=>setForm({...form,description:e.target.value})} />
                 <button style={styles.addBtn} type="submit">Add</button>
               </form>
+              <div className="erp-table-wrap">
               <table style={styles.table} className="erp-table">
                 <thead><tr>{['ID','Level','Desc','Del'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                 <tbody>{levels.map(l=>(
@@ -1352,6 +1476,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                   </tr>
                 ))}</tbody>
               </table>
+              </div>
             </div>
 
             {/* FACULTIES */}
@@ -1362,6 +1487,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                 <input style={styles.input} placeholder="Description" value={form.description||''} onChange={e=>setForm({...form,description:e.target.value})} />
                 <button style={styles.addBtn} type="submit">Add</button>
               </form>
+              <div className="erp-table-wrap">
               <table style={styles.table} className="erp-table">
                 <thead><tr>{['ID','Faculty','Desc','Del'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                 <tbody>{faculties.map(f=>(
@@ -1373,6 +1499,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                   </tr>
                 ))}</tbody>
               </table>
+              </div>
             </div>
 
             {/* PROGRAMMES */}
@@ -1391,6 +1518,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                 <input style={styles.input} type="number" placeholder="Duration (yrs)" value={form.duration_years||''} onChange={e=>setForm({...form,duration_years:e.target.value})} required />
                 <button style={styles.addBtn} type="submit">Add</button>
               </form>
+              <div className="erp-table-wrap erp-programmes-scroll">
               <table style={styles.table} className="erp-table">
                 <thead><tr>{['Level','Faculty','Programme','Dur','Del'].map(h=><th key={h} style={styles.th}>{h}</th>)}</tr></thead>
                 <tbody>{programmes.map(p=>(
@@ -1411,6 +1539,7 @@ export default function AdminDashboard({ admin, onLogout }) {
                   </tr>
                 ))}</tbody>
               </table>
+              </div>
             </div>
           </div>
         )}
@@ -2528,6 +2657,86 @@ export default function AdminDashboard({ admin, onLogout }) {
           </div>
         )}
       </div>
+
+      {/* Import Errors Modal — shown after teacher CSV import */}
+      {importErrorsOpen && (
+        <div
+          onClick={() => setImportErrorsOpen(false)}
+          style={{
+            position:'fixed', inset:0, background:'rgba(0,0,0,0.55)', zIndex:9999,
+            display:'flex', alignItems:'center', justifyContent:'center', padding:'1rem'
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background:'#fff', borderRadius:'12px', maxWidth:'900px', width:'100%',
+              maxHeight:'80vh', display:'flex', flexDirection:'column',
+              boxShadow:'0 20px 40px rgba(0,0,0,0.25)'
+            }}
+          >
+            <div style={{
+              padding:'1rem 1.5rem', borderBottom:'2px solid #e2e8f0',
+              display:'flex', justifyContent:'space-between', alignItems:'center',
+              background:'#fffaf0', borderRadius:'12px 12px 0 0'
+            }}>
+              <h3 style={{margin:0, color:'#744210'}}>
+                &#9888;&#65039;&nbsp; Import Issues ({importErrors.length})
+              </h3>
+              <button
+                onClick={() => setImportErrorsOpen(false)}
+                style={{background:'none', border:'none', fontSize:'1.5rem', cursor:'pointer', color:'#718096'}}
+              >&times;</button>
+            </div>
+            <div style={{overflow:'auto', flex:1, padding:'1rem 1.5rem'}}>
+              <p style={{margin:'0 0 1rem', color:'#4a5568', fontSize:'0.9rem'}}>
+                <strong style={{color:'#e53e3e'}}>&#10060; Errors</strong> caused the row to fail.{' '}
+                <strong style={{color:'#d69e2e'}}>&#9888;&#65039; Warnings</strong> imported the teacher but dropped a discipline/department link.
+              </p>
+              <table style={{width:'100%', borderCollapse:'collapse', fontSize:'0.85rem'}}>
+                <thead>
+                  <tr style={{background:'#2d3748', color:'#fff'}}>
+                    <th style={{padding:'0.6rem 0.8rem', textAlign:'left'}}>Row</th>
+                    <th style={{padding:'0.6rem 0.8rem', textAlign:'left'}}>Name</th>
+                    <th style={{padding:'0.6rem 0.8rem', textAlign:'left'}}>Email</th>
+                    <th style={{padding:'0.6rem 0.8rem', textAlign:'left'}}>Severity</th>
+                    <th style={{padding:'0.6rem 0.8rem', textAlign:'left'}}>Reason</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {importErrors.map((e, i) => (
+                    <tr key={i} style={{borderBottom:'1px solid #e2e8f0', background: e.severity==='error'?'#fff5f5':'#fffbeb'}}>
+                      <td style={{padding:'0.6rem 0.8rem', fontWeight:'600'}}>{e.row}</td>
+                      <td style={{padding:'0.6rem 0.8rem'}}>{e.name}</td>
+                      <td style={{padding:'0.6rem 0.8rem', color:'#4a5568'}}>{e.email}</td>
+                      <td style={{padding:'0.6rem 0.8rem'}}>
+                        {e.severity==='error'
+                          ? <span style={{color:'#e53e3e', fontWeight:'600'}}>&#10060; Error</span>
+                          : <span style={{color:'#d69e2e', fontWeight:'600'}}>&#9888;&#65039; Warning</span>}
+                      </td>
+                      <td style={{padding:'0.6rem 0.8rem', color:'#2d3748'}}>{e.reason}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div style={{
+              padding:'1rem 1.5rem', borderTop:'2px solid #e2e8f0',
+              display:'flex', justifyContent:'flex-end', gap:'0.75rem',
+              background:'#f7fafc', borderRadius:'0 0 12px 12px'
+            }}>
+              <button
+                onClick={downloadImportErrorsCSV}
+                style={{padding:'0.6rem 1.2rem', background:'#4c51bf', color:'#fff', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'600'}}
+              >&#128229; Download CSV</button>
+              <button
+                onClick={() => setImportErrorsOpen(false)}
+                style={{padding:'0.6rem 1.2rem', background:'#a0aec0', color:'#fff', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'600'}}
+              >Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2546,7 +2755,7 @@ const styles = {
   activeTab: { color:'#4c51bf', borderBottom:'2px solid #4c51bf', fontWeight:'600' },
   content: { padding:'2rem' },
   msg: { padding:'0.75rem 2rem', fontWeight:'600' },
-  threeCol: { display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(320px, 1fr))', gap:'1.5rem' },
+  threeCol: { display:'grid', gridTemplateColumns:'1fr 1fr 1.6fr', gap:'1.5rem' },
   section: { background:'#fff', padding:'1.5rem', borderRadius:'12px', boxShadow:'0 2px 8px rgba(0,0,0,0.08)' },
   sectionTitle: { margin:'0 0 1rem', color:'#2d3748', borderBottom:'2px solid #e2e8f0', paddingBottom:'0.5rem' },
   readonlyBanner: { background:'#ebf8ff', color:'#2b6cb0', border:'1px solid #90cdf4', borderRadius:'8px', padding:'0.75rem 1.25rem', marginBottom:'1.5rem', fontWeight:'600' },
@@ -2560,7 +2769,7 @@ const styles = {
   input: { padding:'0.6rem 0.9rem', borderRadius:'6px', border:'1px solid #cbd5e0', fontSize:'0.95rem', minWidth:'160px' },
   addBtn: { padding:'0.6rem 1.5rem', background:'#4c51bf', color:'#fff', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'600' },
   payBtn: { padding:'0.3rem 0.75rem', background:'#48bb78', color:'#fff', border:'none', borderRadius:'4px', cursor:'pointer', fontWeight:'600' },
-  table: { width:'100%', borderCollapse:'collapse', background:'#fff', borderRadius:'10px', overflow:'hidden', boxShadow:'0 2px 8px rgba(0,0,0,0.08)' },
+  table: { width:'100%', borderCollapse:'collapse', background:'#fff', borderRadius:'10px', boxShadow:'0 2px 8px rgba(0,0,0,0.08)' },
   th: { background:'#2d3748', color:'#fff', padding:'0.75rem 1rem', textAlign:'left', fontSize:'0.85rem' },
   td: { padding:'0.65rem 1rem', borderBottom:'1px solid #e2e8f0', fontSize:'0.85rem' },
   delBtn: { background:'#e53e3e', color:'#fff', border:'none', padding:'0.3rem 0.75rem', borderRadius:'4px', cursor:'pointer' },
