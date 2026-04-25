@@ -13,6 +13,7 @@ export default function AdminDashboard({ admin, onLogout }) {
   const [attendance, setAttendance] = useState([]);
   const [fees, setFees] = useState([]);
   const [feeSummary, setFeeSummary] = useState([]);
+  const [academicYears, setAcademicYears] = useState([]);
   const [bulkFeeForm, setBulkFeeForm] = useState({});
   const [feeFilter, setFeeFilter] = useState('');
   const [marks, setMarks] = useState([]);
@@ -67,6 +68,7 @@ export default function AdminDashboard({ admin, onLogout }) {
     fetchStudents();
     fetchDisciplines();
     fetchDepartments();
+    fetchAcademicYears();
   }, []);
 
   useEffect(() => {
@@ -90,7 +92,8 @@ export default function AdminDashboard({ admin, onLogout }) {
 
   const fetchLevels = async () => { try { const r = await API.get('/levels'); setLevels(r.data); } catch(e){} };
   const fetchFaculties = async () => { try { const r = await API.get('/faculties'); setFaculties(r.data); } catch(e){} };
-  const fetchProgrammes = async () => { try { const r = await API.get('/programmes'); setProgrammes(r.data); } catch(e){} };
+const fetchProgrammes = async () => { try { const r = await API.get('/programmes'); setProgrammes(r.data); } catch(e){} };
+  const fetchAcademicYears = async () => { try { const r = await API.get('/admin/academic-years'); setAcademicYears(r.data); } catch(e){} };
   const fetchStudents = async () => { try { const r = await API.get('/admin/students'); setStudents(r.data); } catch(e){} };
   const fetchDisciplines = async () => { try { const r = await API.get('/disciplines'); setDisciplines(r.data); } catch(e){} };
   const fetchDepartments = async () => { try { const r = await API.get('/departments'); setDepartments(r.data); } catch(e){} };
@@ -1657,6 +1660,14 @@ fees: [{ roll_no:'BCA001', amount:15000, fee_type:'Tuition Fee', due_date:'2026-
               </select>
               <input style={styles.input} type="number" placeholder="Semester" value={form.semester||''} onChange={e=>setForm({...form,semester:e.target.value})} required />
               <input style={styles.input} type="number" placeholder="Year" value={form.year||''} onChange={e=>setForm({...form,year:e.target.value})} required />
+              <select style={styles.input} value={form.academic_year_id||''} onChange={e=>setForm({...form,academic_year_id:e.target.value})} required>
+                <option value="">Select Academic Year</option>
+                {academicYears.map(ay => (
+                  <option key={ay.academic_year_id} value={ay.academic_year_id}>
+                    {ay.year_label}{ay.is_current ? ' (current)' : ''}
+                  </option>
+                ))}
+              </select>
               <input style={styles.input} type="password" placeholder="Password" value={form.password||''} onChange={e=>setForm({...form,password:e.target.value})} required />
               {/* Discipline picker — shown for multi-discipline programmes like B.A */}
               {(() => {
@@ -1717,24 +1728,7 @@ fees: [{ roll_no:'BCA001', amount:15000, fee_type:'Tuition Fee', due_date:'2026-
                     </div>
                   );
                 })()}
-                {(() => {
-                  const editProg = programmes.find(p => String(p.programme_id) === String(editingStudent.programme_id));
-                  const needsDisc = editProg && (editProg.scheme === 'A' || editProg.scheme === 'B');
-                  if (!needsDisc) return null;
-                  return (
-                    <div style={{gridColumn:'1/-1',background:'#ebf8ff',borderRadius:'8px',padding:'0.75rem 1rem',border:'1px solid #bee3f8'}}>
-                      <p style={{margin:'0 0 0.5rem',fontWeight:'600',color:'#2b6cb0',fontSize:'0.85rem'}}>Disciplines (select 3)</p>
-                      <div style={{display:'flex',gap:'8px',flexWrap:'wrap'}}>
-                        {[1,2,3].map(i => (
-                          <select key={i} style={{...styles.input,flex:'1 1 180px',margin:0}} value={editingStudent['discipline_'+i]||''} onChange={e=>setEditingStudent({...editingStudent,['discipline_'+i]:e.target.value})}>
-                            <option value="">Discipline {i}</option>
-                            {disciplines.map(d=><option key={d.discipline_id} value={d.discipline_id}>{d.discipline_name}</option>)}
-                          </select>
-                        ))}
-                      </div>
-                    </div>
-                  );
-                })()}
+               
                 <div style={{display:'flex',gap:'0.5rem'}}>
                   <button style={styles.addBtn} type="submit">💾 Save</button>
                   <button style={{...styles.delBtn,padding:'0.6rem 1rem'}} type="button" onClick={()=>setEditingStudent(null)}>Cancel</button>
