@@ -948,4 +948,14 @@ router.delete('/enrollment/reset/:student_id', async (req, res) => {
   } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
 });
 
+// Get all academic years (for admin dropdowns in forms)
+router.get('/academic-years', async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      'SELECT academic_year_id, year_label, is_current FROM academic_years ORDER BY academic_year_id DESC'
+    );
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Internal server error' }); }
+});
+
 module.exports = router;
